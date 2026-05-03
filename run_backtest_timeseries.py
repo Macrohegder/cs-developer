@@ -106,7 +106,7 @@ def step3_performance_analysis(target_df, config: dict) -> dict:
 def save_results(target_df, result: dict, config: dict) -> None:
     import pandas as pd
 
-    prefix = "/root/futures_term_structure_strategies/result_timeseries"
+    prefix = "/root/cs_developer/result_timeseries"
 
     target_path = f"{prefix}_target.csv"
     target_df.to_csv(target_path)

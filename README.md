@@ -29,7 +29,7 @@
 ### 方式一：命令行一键执行（推荐）
 
 ```bash
-cd /root/futures_term_structure_strategies
+cd /root/cs_developer
 python3 run_backtest.py
 ```
 

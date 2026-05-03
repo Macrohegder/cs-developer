@@ -68,7 +68,7 @@ FACTORS = [
     }
 ]
 
-OUTPUT_DIR = "/root/futures_term_structure_strategies"
+OUTPUT_DIR = "/root/cs_developer"
 
 
 # =============================================================================

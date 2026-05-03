@@ -232,7 +232,7 @@ def save_results(target_df, result: dict, config: dict) -> None:
     """保存回测结果到本地文件（使用 spread_return 前缀以区分）"""
     import pandas as pd
 
-    prefix = "/root/futures_term_structure_strategies/result_spread_return"
+    prefix = "/root/cs_developer/result_spread_return"
 
     # 保存目标仓位
     target_path = f"{prefix}_target.csv"

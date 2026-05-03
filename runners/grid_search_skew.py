@@ -158,7 +158,7 @@ def run_grid_search():
     # 保存结果到 CSV
     import pandas as pd
     df = DataFrame(results)
-    out_path = "/root/futures_term_structure_strategies/result_grid_search_skew.csv"
+    out_path = "/root/cs_developer/result_grid_search_skew.csv"
     df.to_csv(out_path, index=False)
     print(f"\n  详细结果已保存: {out_path}")
 

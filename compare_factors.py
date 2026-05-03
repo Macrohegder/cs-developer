@@ -19,11 +19,11 @@ plt.rcParams['axes.unicode_minus'] = False
 # =============================================================================
 # 配置路径
 # =============================================================================
-ZSCORE_PNL = "/root/futures_term_structure_strategies/result_zscore_pnl.csv"
-RETURN_PNL = "/root/futures_term_structure_strategies/result_spread_return_pnl.csv"
-ZSCORE_PRODUCT = "/root/futures_term_structure_strategies/result_zscore_product.csv"
-RETURN_PRODUCT = "/root/futures_term_structure_strategies/result_spread_return_product.csv"
-OUTPUT_DIR = "/root/futures_term_structure_strategies"
+ZSCORE_PNL = "/root/cs_developer/result_zscore_pnl.csv"
+RETURN_PNL = "/root/cs_developer/result_spread_return_pnl.csv"
+ZSCORE_PRODUCT = "/root/cs_developer/result_zscore_product.csv"
+RETURN_PRODUCT = "/root/cs_developer/result_spread_return_product.csv"
+OUTPUT_DIR = "/root/cs_developer"
 
 
 def load_pnl(path):
