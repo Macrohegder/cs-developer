@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """
-期货期限结构策略回测 — 标准化执行脚本
+Skew 因子横截面多空策略回测 — 标准化执行脚本
 
-严格遵循 /root/long-short-term-strategy-revise/ 的三步流程：
-  Step 1: FactorGenerator 计算因子 → DataCenter 保存
+严格遵循三步流程：
+  Step 1: FactorGenerator 计算 Skew 因子 → DataCenter 保存
   Step 2: StrategyBacktester 执行回测 → 生成 target_df
-  Step 3: calculate_portfolio_performance 计算绩效 → 输出指标与图表
+  Step 3: calculate_portfolio_performance 计算绩效 → 输出指标
 
-策略逻辑说明：
-- 因子：SpreadZScoreFactor（F1-F2 价差的 Z-Score）
-- 策略：TermStructureStrategy（双合约、等权重、滚动持仓 holding_period 天）
+策略逻辑：
+- 因子：SkewFactor（过去180天日收益率的偏度）
+- 策略：CrossSectionalStrategy（横截面排序，做多负偏度，做空正偏度）
+- 持仓：滚动 holding_period 天，每日新开一份仓位
+- 交易标的：主力合约（通过 DominantManager 映射到具体合约）
+
+回测区间：2015-01-01 起
 """
+
+import sys
+from pathlib import Path
+
+# 将项目根目录加入 Python 路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime
 
@@ -20,12 +30,12 @@ from vnpy_alpharesearch.data_center import DataCenter
 from vnpy_alpharesearch.factor import FactorGenerator
 from vnpy_alpharesearch.strategy import StrategyBacktester, calculate_portfolio_performance
 
-from spread_zscore_factor import SpreadZScoreFactor
-from term_structure_strategy import TermStructureStrategy
+from factors.skew_factor import SkewFactor
+from strategies.cross_sectional_strategy import CrossSectionalStrategy
 
 
 # =============================================================================
-# 参数配置区（所有可调参数集中在此处）
+# 参数配置区
 # =============================================================================
 CONFIG = {
     # 品种池：活跃的商品期货（88 主力连续合约）
@@ -44,28 +54,33 @@ CONFIG = {
     ],
 
     # 回测时间范围
-    "start": datetime(2011, 1, 1),
-    "end": datetime(2026, 4, 30),
+    "start": datetime(2015, 1, 1),
+    "end": datetime(2025, 12, 31),
 
     # 初始资金
     "capital": 10_000_000,
 
     # 因子参数
     "factor_setting": {
-        "lookback": 20          # 价差历史回看周期（交易日）
+        "lookback": 180          # Skew 回望期：180个交易日
     },
 
     # 策略参数
     "strategy_setting": {
-        "holding_period": 10,    # 持仓天数
-        "trading_signal": 0.1,   # 每端选股比例
-        "factor_name": "spread_zscore"
+        "holding_period": 5,         # 持仓天数
+        "trading_signal": 0.2,       # 每端选股比例（20%）
+        "factor_name": "skew",       # 因子名称
+        "factor_parameter": "lookback180",  # 因子参数标识
+        "factor_author": "cross_sectional",  # 因子作者
+        "long_low": True,            # 做多负偏度（低Skew），做空正偏度（高Skew）
+        "aggregation": "sum",        # 分仓滚动
+        "leverage": 2.0,             # 2倍名义价值杠杆
     },
 
     # 绩效参数
-    "commission": 0.0001,        # 手续费率（万 1，双边）
+    "commission": 0.0001,        # 手续费率（万1，双边）
     "risk_free": 0,              # 无风险利率
-    "plot_chart": False,         # 是否绘制图表（关闭plotly，后续用matplotlib保存png）
+    "plot_chart": False,         # 是否绘制图表
 
     # 执行优化
     "skip_factor_if_exists": True,  # 若因子已存在于数据库则跳过 Step 1
@@ -75,25 +90,21 @@ CONFIG = {
 def build_vt_symbols(dominant_symbols: list) -> list:
     """
     构建 FactorGenerator 所需的完整 vt_symbols 列表
-    每个品种需要 88（主力连续）和 88A2（次主力连续）
+    Skew 因子只需要 88（主力连续）的价格数据
     """
-    vt_symbols = []
-    for ds in dominant_symbols:
-        vt_symbols.append(ds)
-        vt_symbols.append(ds.replace("88.", "88A2."))
-    return vt_symbols
+    return list(dominant_symbols)
 
 
 def check_factor_exists(config: dict) -> bool:
-    """检查因子是否已存在于数据库中"""
+    """检查 Skew 因子是否已存在于数据库中"""
     try:
         dc = DataCenter()
         df = dc.load_factor_df(
             vt_symbols=config["dominant_symbols"][:2],  # 抽查前两个品种
-            name="spread_zscore",
+            name="skew",
             interval="d",
-            parameter=f"lookback{config['factor_setting']['lookback']}",
-            author="futures_term_structure",
+            parameter="lookback180",
+            author="cross_sectional",
             start=config["start"],
             end=config["end"]
         )
@@ -103,15 +114,11 @@ def check_factor_exists(config: dict) -> bool:
 
 
 def step1_factor_calculation(config: dict) -> None:
-    """
-    Step 1: 因子计算
-    使用 FactorGenerator 加载行情、计算因子、保存到 DataCenter
-    """
+    """Step 1: 因子计算"""
     print("=" * 70)
-    print("Step 1: 计算 SpreadZScore 因子")
+    print("Step 1: 计算 Skew 因子")
     print("=" * 70)
 
-    # 检查是否需要跳过
     if config.get("skip_factor_if_exists", False) and check_factor_exists(config):
         print("因子已存在于数据库中，跳过计算。")
         return
@@ -121,7 +128,6 @@ def step1_factor_calculation(config: dict) -> None:
     end = config["end"]
     vt_symbols = build_vt_symbols(dominant_symbols)
 
-    # 组装因子 setting（需要包含 dominant_symbols 以及起止时间）
     factor_setting = {
         "start": start,
         "end": end,
@@ -129,42 +135,32 @@ def step1_factor_calculation(config: dict) -> None:
         **config["factor_setting"]
     }
 
-    # 创建因子生成器
     fg = FactorGenerator(vt_symbols, Interval.DAILY, start, end)
 
-    # 加载历史价格数据
     print("加载历史价格数据...")
     price_df = fg.load_data()
     print(f"  价格数据加载完成，形状: {price_df.shape}")
 
-    # 计算因子
-    print("计算因子...")
-    factor_df = fg.generate_factor(SpreadZScoreFactor, factor_setting)
+    print("计算 Skew 因子...")
+    factor_df = fg.generate_factor(SkewFactor, factor_setting)
     print(f"  因子计算完成，形状: {factor_df.shape}")
 
-    # 保存因子到 DataCenter（标准接口）
     print("保存因子到 DataCenter...")
     dc = DataCenter()
     dc.save_factor_df(
         df=factor_df,
-        name="spread_zscore",
+        name="skew",
         interval="d",
-        parameter=f"lookback{config['factor_setting']['lookback']}",
-        author="futures_term_structure"
+        parameter="lookback180",
+        author="cross_sectional"
     )
     print("  因子保存完成")
 
 
 def step2_strategy_backtest(config: dict):
-    """
-    Step 2: 策略回测
-    使用 StrategyBacktester 加载数据、运行回测、生成 target_df
-
-    注意：StrategyBacktester 传入 dominant_symbols（仅 88），
-          策略内部通过 DominantManager 映射到具体合约。
-    """
+    """Step 2: 策略回测"""
     print("\n" + "=" * 70)
-    print("Step 2: 策略回测（TermStructureStrategy）")
+    print("Step 2: 策略回测（CrossSectionalStrategy + Skew）")
     print("=" * 70)
 
     dominant_symbols = config["dominant_symbols"]
@@ -172,7 +168,6 @@ def step2_strategy_backtest(config: dict):
     end = config["end"]
     capital = config["capital"]
 
-    # 创建策略回测器（标准接口：只传入 dominant_symbols）
     backtester = StrategyBacktester(
         dominant_symbols,
         Interval.DAILY,
@@ -181,19 +176,16 @@ def step2_strategy_backtest(config: dict):
         capital
     )
 
-    # 加载历史行情数据
     print("加载历史行情数据...")
     backtester.load_data()
 
-    # 运行回测
     print("运行回测...")
     target_df = backtester.run_backtesting(
-        TermStructureStrategy,
+        CrossSectionalStrategy,
         config["strategy_setting"]
     )
     print(f"  回测完成，目标仓位形状: {target_df.shape}")
 
-    # 简单检查
     non_zero_days = (target_df != 0).any(axis=1).sum()
     print(f"  有仓位的交易日: {non_zero_days}/{len(target_df)}")
     print(f"  涉及的具体合约数: {len(target_df.columns)}")
@@ -202,15 +194,11 @@ def step2_strategy_backtest(config: dict):
 
 
 def step3_performance_analysis(target_df, config: dict) -> dict:
-    """
-    Step 3: 绩效分析
-    使用框架内置的 calculate_portfolio_performance 计算完整绩效
-    """
+    """Step 3: 绩效分析"""
     print("\n" + "=" * 70)
     print("Step 3: 绩效分析")
     print("=" * 70)
 
-    # 使用框架标准绩效计算（不自定义）
     result = calculate_portfolio_performance(
         target_df,
         Interval.DAILY,
@@ -220,7 +208,6 @@ def step3_performance_analysis(target_df, config: dict) -> dict:
         plot_chart=config["plot_chart"]
     )
 
-    # 打印核心统计指标
     stats = result["statistics"]
     print("\n【策略绩效指标】")
     for key, value in stats.items():
@@ -233,20 +220,17 @@ def save_results(target_df, result: dict, config: dict) -> None:
     """保存回测结果到本地文件"""
     import pandas as pd
 
-    prefix = "/root/futures_term_structure_strategies/result"
+    prefix = "/root/futures_term_structure_strategies/result_skew"
 
-    # 保存目标仓位
     target_path = f"{prefix}_target.csv"
     target_df.to_csv(target_path)
     print(f"\n  目标仓位已保存: {target_path}")
 
-    # 保存累计盈亏曲线
     if "overall" in result:
         pnl_path = f"{prefix}_pnl.csv"
         result["overall"][["balance", "drawdown", "ddpercent"]].to_csv(pnl_path)
         print(f"  净值曲线已保存: {pnl_path}")
 
-    # 保存分品种盈亏
     if "product" in result:
         product_path = f"{prefix}_product.csv"
         result["product"].to_csv(product_path)
@@ -254,23 +238,16 @@ def save_results(target_df, result: dict, config: dict) -> None:
 
 
 def main():
-    """主执行函数：严格按 Step 1 → Step 2 → Step 3 执行"""
+    """主执行函数"""
     config = CONFIG
 
-    # Step 1: 因子计算
     step1_factor_calculation(config)
-
-    # Step 2: 策略回测
     target_df = step2_strategy_backtest(config)
-
-    # Step 3: 绩效分析
     result = step3_performance_analysis(target_df, config)
-
-    # 保存结果
     save_results(target_df, result, config)
 
     print("\n" + "=" * 70)
-    print("全部流程执行完毕！")
+    print("Skew 因子回测执行完毕！")
     print("=" * 70)
 
 

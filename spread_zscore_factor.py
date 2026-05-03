@@ -7,23 +7,23 @@ from vnpy_alpharesearch.factor import FactorTemplate
 from vnpy_alpharesearch import DataCenter
 
 
-class SpreadReturnFactor(FactorTemplate):
+class SpreadZScoreFactor(FactorTemplate):
     """
-    期限结构价差涨跌幅因子（价差动量反转）
+    期限结构价差 Z-Score 因子
 
-    核心逻辑：
+    核心逻辑（严格按文章定义）：
     - F1 = 主力连续合约 (88)
     - F2 = 次主力连续合约 (88A2)
     - 每日价差 spread = F1_close - F2_close
-    - 因子 = 过去 lookback 天价差的涨跌幅（百分比变化）
-    - 基于动量反转假设：价差过去涨得越多，未来越倾向反转（做空）；
-      跌得越多，未来越倾向反弹（做多）
+    - 因子 = 当前价差偏离历史均值的程度（Z-Score）
+    - Z-Score = (current_spread - mean(spread, lookback)) / std(spread, lookback)
+    - 基于均值回归假设：Z-Score 越高，下周越倾向反转（F1 相对 F2 下跌）
     """
 
     start: datetime = None                  # 开始时间
     end: datetime = None                    # 结束时间
     dominant_symbols: List[str] = None      # 主力合约表键（如 RB88.SHFE）
-    lookback: int = 10                      # 价差历史回看周期（默认10个交易日≈2周）
+    lookback: int = 20                      # 价差历史回看周期（默认20个交易日≈1个月）
 
     def __init__(self, vt_symbols: List[str], setting: dict) -> None:
         """"""
@@ -60,7 +60,7 @@ class SpreadReturnFactor(FactorTemplate):
             return {s: float('nan') for s in self.dominant_symbols}
         dominant_series: Series = dominant_df.iloc[-1, :]
 
-        # 计算价差涨跌幅因子
+        # 计算价差 Z-Score
         factor_data: Dict[str, float] = {}
 
         for dominant_symbol in self.dominant_symbols:
@@ -75,29 +75,31 @@ class SpreadReturnFactor(FactorTemplate):
                 factor_data[dominant_symbol] = float('nan')
                 continue
 
-            # 检查数据长度是否足够计算涨跌幅（需要 lookback+1 天数据）
-            required_len = self.lookback + 1
-            if len(f1_close_series) < required_len or len(f2_close_series) < required_len:
+            # 检查数据长度是否足够计算 Z-Score
+            if len(f1_close_series) < self.lookback or len(f2_close_series) < self.lookback:
                 factor_data[dominant_symbol] = float('nan')
                 continue
 
-            # 计算价差序列（最近 lookback+1 天）
-            f1_recent: Series = f1_close_series.iloc[-required_len:]
-            f2_recent: Series = f2_close_series.iloc[-required_len:]
+            # 计算价差序列（最近 lookback 天）
+            f1_recent: Series = f1_close_series.iloc[-self.lookback:]
+            f2_recent: Series = f2_close_series.iloc[-self.lookback:]
             spread_series: Series = f1_recent - f2_recent
 
-            # 当前价差和 lookback 天前的价差
+            # 当前价差
             current_spread: float = spread_series.iloc[-1]
-            past_spread: float = spread_series.iloc[0]
+
+            # 历史均值和标准差
+            spread_mean: float = spread_series.mean()
+            spread_std: float = spread_series.std()
 
             # 避免除零
-            if past_spread == 0 or pd_isna(past_spread):
+            if spread_std == 0 or pd_isna(spread_std):
                 factor_data[dominant_symbol] = float('nan')
                 continue
 
-            # 计算价差涨跌幅 = (当前价差 - 过去价差) / 过去价差
-            spread_return: float = (current_spread - past_spread) / abs(past_spread)
-            factor_data[dominant_symbol] = spread_return
+            # 计算 Z-Score = (当前 - 均值) / 标准差
+            z_score: float = (current_spread - spread_mean) / spread_std
+            factor_data[dominant_symbol] = z_score
 
         # 返回因子数值
         return factor_data

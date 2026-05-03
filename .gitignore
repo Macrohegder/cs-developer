@@ -1,3 +1,17 @@
+# 回测结果数据
+result_*.csv
+optimize_skew_results.csv
+grid_search_skew_results.csv
+
+# 图片输出
+*.png
+
+# 压缩包
+*.zip
+
+# 备份目录
+archive/
+
+# Python缓存
 __pycache__/
-*.log
 *.pyc

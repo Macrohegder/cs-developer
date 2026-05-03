@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-期货期限结构策略回测 — 标准化执行脚本
+期货期限结构策略回测 — 价差涨跌幅因子（动量反转）
 
-严格遵循 /root/long-short-term-strategy-revise/ 的三步流程：
+与 spread_zscore 的对比：
+  - spread_zscore: 均值回归逻辑，Z-Score 衡量价差偏离均值程度
+  - spread_return: 动量反转逻辑，过去10天价差涨跌幅衡量价差动量
+
+执行流程（同样三步）：
   Step 1: FactorGenerator 计算因子 → DataCenter 保存
   Step 2: StrategyBacktester 执行回测 → 生成 target_df
   Step 3: calculate_portfolio_performance 计算绩效 → 输出指标与图表
-
-策略逻辑说明：
-- 因子：SpreadZScoreFactor（F1-F2 价差的 Z-Score）
-- 策略：TermStructureStrategy（双合约、等权重、滚动持仓 holding_period 天）
 """
 
 from datetime import datetime
@@ -20,7 +20,7 @@ from vnpy_alpharesearch.data_center import DataCenter
 from vnpy_alpharesearch.factor import FactorGenerator
 from vnpy_alpharesearch.strategy import StrategyBacktester, calculate_portfolio_performance
 
-from spread_zscore_factor import SpreadZScoreFactor
+from spread_return_factor import SpreadReturnFactor
 from term_structure_strategy import TermStructureStrategy
 
 
@@ -52,14 +52,16 @@ CONFIG = {
 
     # 因子参数
     "factor_setting": {
-        "lookback": 20          # 价差历史回看周期（交易日）
+        "lookback": 10          # 价差历史回看周期（交易日），过去10天价差涨跌幅
     },
 
     # 策略参数
     "strategy_setting": {
-        "holding_period": 10,    # 持仓天数
-        "trading_signal": 0.1,   # 每端选股比例
-        "factor_name": "spread_zscore"
+        "holding_period": 10,          # 持仓天数
+        "trading_signal": 0.1,         # 每端选股比例
+        "factor_name": "spread_return",      # 使用价差涨跌幅因子
+        "factor_parameter": "lookback10",    # 因子参数
+        "factor_author": "futures_term_structure"
     },
 
     # 绩效参数
@@ -90,7 +92,7 @@ def check_factor_exists(config: dict) -> bool:
         dc = DataCenter()
         df = dc.load_factor_df(
             vt_symbols=config["dominant_symbols"][:2],  # 抽查前两个品种
-            name="spread_zscore",
+            name="spread_return",
             interval="d",
             parameter=f"lookback{config['factor_setting']['lookback']}",
             author="futures_term_structure",
@@ -108,7 +110,7 @@ def step1_factor_calculation(config: dict) -> None:
     使用 FactorGenerator 加载行情、计算因子、保存到 DataCenter
     """
     print("=" * 70)
-    print("Step 1: 计算 SpreadZScore 因子")
+    print("Step 1: 计算 SpreadReturn 因子（过去10天价差涨跌幅）")
     print("=" * 70)
 
     # 检查是否需要跳过
@@ -139,7 +141,7 @@ def step1_factor_calculation(config: dict) -> None:
 
     # 计算因子
     print("计算因子...")
-    factor_df = fg.generate_factor(SpreadZScoreFactor, factor_setting)
+    factor_df = fg.generate_factor(SpreadReturnFactor, factor_setting)
     print(f"  因子计算完成，形状: {factor_df.shape}")
 
     # 保存因子到 DataCenter（标准接口）
@@ -147,7 +149,7 @@ def step1_factor_calculation(config: dict) -> None:
     dc = DataCenter()
     dc.save_factor_df(
         df=factor_df,
-        name="spread_zscore",
+        name="spread_return",
         interval="d",
         parameter=f"lookback{config['factor_setting']['lookback']}",
         author="futures_term_structure"
@@ -159,12 +161,9 @@ def step2_strategy_backtest(config: dict):
     """
     Step 2: 策略回测
     使用 StrategyBacktester 加载数据、运行回测、生成 target_df
-
-    注意：StrategyBacktester 传入 dominant_symbols（仅 88），
-          策略内部通过 DominantManager 映射到具体合约。
     """
     print("\n" + "=" * 70)
-    print("Step 2: 策略回测（TermStructureStrategy）")
+    print("Step 2: 策略回测（TermStructureStrategy + SpreadReturn）")
     print("=" * 70)
 
     dominant_symbols = config["dominant_symbols"]
@@ -230,10 +229,10 @@ def step3_performance_analysis(target_df, config: dict) -> dict:
 
 
 def save_results(target_df, result: dict, config: dict) -> None:
-    """保存回测结果到本地文件"""
+    """保存回测结果到本地文件（使用 spread_return 前缀以区分）"""
     import pandas as pd
 
-    prefix = "/root/futures_term_structure_strategies/result"
+    prefix = "/root/futures_term_structure_strategies/result_spread_return"
 
     # 保存目标仓位
     target_path = f"{prefix}_target.csv"
@@ -270,7 +269,7 @@ def main():
     save_results(target_df, result, config)
 
     print("\n" + "=" * 70)
-    print("全部流程执行完毕！")
+    print("SpreadReturn 因子回测全部流程执行完毕！")
     print("=" * 70)
 
 
