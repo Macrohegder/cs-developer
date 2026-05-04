@@ -199,6 +199,14 @@ class BatchBacktestEngine:
     # 核心回测逻辑
     # =================================================================
     
+    def _ensure_price_data(self, primary_suffix: str, secondary_suffix: str):
+        """确保价格数据已加载，如后缀不同则重新加载"""
+        if self._close_df is not None and self.primary_suffix == primary_suffix and self.secondary_suffix == secondary_suffix:
+            return
+        self.primary_suffix = primary_suffix
+        self.secondary_suffix = secondary_suffix
+        self._load_price_data()
+    
     def run_factor(
         self,
         factor_name: str,
@@ -224,6 +232,14 @@ class BatchBacktestEngine:
             leverage: 名义杠杆倍数
             commission: 单边手续费率
         """
+        # 0. 根据因子注册表确定回测价格基础
+        meta = self.registry.get(factor_name)
+        if meta and meta.backtest_price_suffix:
+            target_suffix = meta.backtest_price_suffix
+            # Carry 类因子需要次主力，其他不需要
+            target_sec = "88A2" if factor_name in ["carry_ret", "carry_momentum", "spread_zscore", "spread_return"] else "889"
+            self._ensure_price_data(target_suffix, target_sec)
+        
         # 1. 加载因子数据
         if factor_df is None:
             factor_df = self.load_factor_df(factor_name)
