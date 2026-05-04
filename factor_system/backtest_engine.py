@@ -331,6 +331,8 @@ class BatchBacktestEngine:
         # 3. 对齐日期
         factor_df, close_df = factor_df.align(self._close_df, join='inner', axis=0)
         returns_df = close_df.pct_change()
+        # 过滤 888/889 数据中负价格导致的 inf 收益率
+        returns_df = returns_df.replace([np.inf, -np.inf], np.nan)
         
         if len(factor_df) < holding_period + 10:
             if self.verbose:
