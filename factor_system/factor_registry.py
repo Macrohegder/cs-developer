@@ -51,7 +51,6 @@ class FactorMeta:
     references: List[str] = field(default_factory=list)  # 参考文献
     lookback_days: int = 20             # 典型回看周期
     ic_direction: int = 1               # 预期IC方向: 1=正相关, -1=负相关
-    backtest_price_suffix: str = "888"   # 简化回测价格基础: 99/888/889（禁用88）
     created_at: str = ""                # 创建日期
     
     def to_dict(self) -> dict:
@@ -95,7 +94,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="stable_momentum",
@@ -108,7 +106,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="trend_coeff",
@@ -121,7 +118,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="intraday_momentum",
@@ -134,7 +130,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="overnight_momentum",
@@ -147,7 +142,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="rsi_momentum",
@@ -160,7 +154,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="bias_indicator",
@@ -173,7 +166,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 反转类 (Reversal) ====================
@@ -188,7 +180,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 期限结构类 (Carry/Term Structure) ====================
@@ -203,7 +194,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=5,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="carry_momentum",
@@ -216,7 +206,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 波动率类 (Volatility) ====================
@@ -231,7 +220,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="parkinson_volatility",
@@ -244,7 +233,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="gk_volatility",
@@ -257,7 +246,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="duvol",
@@ -270,7 +259,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="timevol",
@@ -283,7 +272,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=40,
         ic_direction=1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="coef_of_variation",
@@ -296,7 +285,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     
     # ==================== 偏度类 (Skewness) ====================
@@ -311,7 +300,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=60,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     
     # ==================== 流动性类 (Liquidity) ====================
@@ -326,7 +315,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="abs_amivest",
@@ -339,7 +327,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 资金流向类 (Cash Flow) ====================
@@ -354,7 +341,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="cf_rsi",
@@ -367,7 +353,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 持仓/套保压力类 (Open Interest) ====================
@@ -382,7 +367,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=5,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="hedging_pressure",
@@ -395,7 +379,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=5,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 技术指标类 (Technical) ====================
@@ -410,7 +393,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="cci",
@@ -423,7 +405,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="williams_r",
@@ -436,7 +417,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="force_index",
@@ -449,7 +429,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=13,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="adx",
@@ -462,7 +441,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="mfi",
@@ -475,7 +453,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="chaikin_osc",
@@ -488,7 +465,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=10,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="ulcer_index",
@@ -501,7 +477,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=14,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="trix",
@@ -514,7 +489,6 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=45,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 统计类 (Statistical) ====================
@@ -529,7 +503,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="kurtosis",
@@ -542,7 +516,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=60,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="win_rate",
@@ -555,7 +529,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="sharpe_ratio",
@@ -568,7 +542,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=60,
         ic_direction=1,
-        backtest_price_suffix="889",
+
     ),
     FactorMeta(
         name="max_drawdown",
@@ -581,7 +555,7 @@ BUILT_IN_FACTORS = [
         source="CSstrategy_summary",
         lookback_days=60,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ),
     
     # ==================== 现有 cs_developer 因子 ====================
@@ -596,7 +570,6 @@ BUILT_IN_FACTORS = [
         source="cs_developer",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="spread_return",
@@ -609,7 +582,6 @@ BUILT_IN_FACTORS = [
         source="cs_developer",
         lookback_days=10,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 新增快速验证因子 ====================
@@ -624,7 +596,6 @@ BUILT_IN_FACTORS = [
         source="cs_developer",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="term_structure_slope",
@@ -637,7 +608,6 @@ BUILT_IN_FACTORS = [
         source="cs_developer",
         lookback_days=20,
         ic_direction=1,
-        backtest_price_suffix="888",
     ),
     FactorMeta(
         name="opening_gap_reversal",
@@ -650,7 +620,6 @@ BUILT_IN_FACTORS = [
         source="cs_developer",
         lookback_days=20,
         ic_direction=-1,
-        backtest_price_suffix="888",
     ),
     
     # ==================== 889 版本（基于 889 数据计算因子值）====================
@@ -678,7 +647,7 @@ for _meta in BUILT_IN_FACTORS:
         status=_meta.status,
         lookback_days=_meta.lookback_days,
         ic_direction=_meta.ic_direction,
-        backtest_price_suffix=_meta.backtest_price_suffix,
+        # backtest_price_suffix removed - only full backtest is used
         created_at=_meta.created_at,
     )
     _BUILT_IN_889_FACTORS.append(_889_meta)
@@ -698,7 +667,7 @@ if _skew_meta:
         status=FactorStatus.ACTIVE,
         lookback_days=180,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ))
     _BUILT_IN_889_FACTORS.append(FactorMeta(
         name="skew_180_889",
@@ -712,7 +681,7 @@ if _skew_meta:
         status=FactorStatus.ACTIVE,
         lookback_days=180,
         ic_direction=-1,
-        backtest_price_suffix="889",
+
     ))
 
 # 合并到内置因子库
