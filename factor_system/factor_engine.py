@@ -504,8 +504,8 @@ def get_engine(
     dominant_symbols: List[str],
     start: datetime,
     end: datetime,
-    primary_suffix: str = "99",
-    secondary_suffix: str = "889",
+    primary_suffix: str = "88",
+    secondary_suffix: str = "88A2",
     verbose: bool = True
 ) -> FactorEngine:
     """获取带全局缓存的引擎实例"""

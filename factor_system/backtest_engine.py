@@ -209,7 +209,7 @@ class BatchBacktestEngine:
         aggregation: str = "sum",
         leverage: float = 2.0,
         commission: float = 0.0001,
-        auto_direction: bool = True,
+        auto_direction: bool = False,
     ) -> Optional[BacktestResult]:
         """
         向量化回测单个因子
@@ -231,15 +231,15 @@ class BatchBacktestEngine:
         if factor_df is None or factor_df.empty:
             return None
         
-        # 2. 自动推断 long_low
+        # 2. 从注册表推断 long_low（强制与标准化模板一致）
         if long_low is None:
             meta = self.registry.get(factor_name)
             if meta and meta.ic_direction == -1:
-                long_low = True   # 注册表假设：IC 负相关 → 做多低值
+                long_low = True   # IC 负相关 → 做多低值
             else:
-                long_low = False  # 注册表假设：IC 正相关 → 做多高值
+                long_low = False  # IC 正相关 → 做多高值
         
-        # 2b. 自动方向选择：同时测试两个方向，取夏普更高的
+        # 2b. 自动方向选择（仅当显式启用时，且会提示警告）
         if auto_direction and long_low is not None:
             res_true = self._run_single_direction(
                 factor_name=factor_name,
@@ -275,6 +275,7 @@ class BatchBacktestEngine:
             best_sharpe, best_direction, best_result = max(candidates, key=lambda x: x[0])
             
             if self.verbose:
+                print(f"       [WARN] 自动方向选择已启用，结果可能偏离标准化模板")
                 print(f"       方向选择: long_low={best_direction} (True夏普={res_true.sharpe_ratio:+.2f}, "
                       f"False夏普={res_false.sharpe_ratio:+.2f})")
             
