@@ -612,6 +612,47 @@ BUILT_IN_FACTORS = [
         backtest_price_suffix="888",
     ),
     
+    # ==================== 新增快速验证因子 ====================
+    FactorMeta(
+        name="speculation_ratio",
+        category="sentiment",
+        sub_category="speculation",
+        description="投机度 = 成交量 / 持仓量。高投机度品种通常后续收益更低（IC-）",
+        params={"cycle": 20},
+        data_requirements=["volume", "open_interest"],
+        author="cs_developer",
+        source="cs_developer",
+        lookback_days=20,
+        ic_direction=-1,
+        backtest_price_suffix="888",
+    ),
+    FactorMeta(
+        name="term_structure_slope",
+        category="carry",
+        sub_category="term_structure_momentum",
+        description="期限结构斜率动量 = carry_ret 的时序动量。捕捉期限结构变化的持续性",
+        params={"cycle": 20},
+        data_requirements=["close_price", "contract_expiry"],
+        author="cs_developer",
+        source="cs_developer",
+        lookback_days=20,
+        ic_direction=1,
+        backtest_price_suffix="888",
+    ),
+    FactorMeta(
+        name="opening_gap_reversal",
+        category="technical",
+        sub_category="mean_reversion",
+        description="开盘跳空反转 = 隔夜跳空幅度的绝对值均值。大幅跳空后预期反向修复（IC-）",
+        params={"cycle": 20},
+        data_requirements=["open_price", "close_price"],
+        author="cs_developer",
+        source="cs_developer",
+        lookback_days=20,
+        ic_direction=-1,
+        backtest_price_suffix="888",
+    ),
+    
     # ==================== 889 版本（基于 889 数据计算因子值）====================
     # 动态生成：为每个内置因子（除已带_889后缀的）创建 889 版本
 ]

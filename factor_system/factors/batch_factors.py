@@ -465,3 +465,47 @@ def calc_spread_return(engine: "FactorEngine", lookback: int = 10) -> pd.DataFra
     spread = f1 - f2
     spread_prev = spread.shift(lookback)
     return safe_div(spread - spread_prev, spread_prev.abs(), fill=0.0)
+
+
+# =============================================================================
+# 新增因子 — 快速验证
+# =============================================================================
+
+def calc_speculation_ratio(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
+    """投机度 = 成交量 / 持仓量。值越高投机情绪越浓，预期收益越低（IC-）"""
+    volume = engine.volume
+    oi = engine.open_interest
+    if oi is None or oi.empty:
+        return pd.DataFrame(index=engine.close.index, columns=engine.close.columns)
+    ratio = safe_div(volume, oi, fill=np.nan)
+    return ratio.rolling(window=cycle, min_periods=cycle).mean()
+
+
+def calc_term_structure_slope(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
+    """期限结构斜率动量 = carry_ret 的时序动量。捕捉期限结构变化的持续性"""
+    f1 = engine.close
+    f2 = engine.f2_close
+    if f2 is None or f2.empty:
+        return pd.DataFrame(index=f1.index, columns=f1.columns)
+    
+    common_cols = f1.columns.intersection(f2.columns)
+    f1 = f1[common_cols]
+    f2 = f2[common_cols]
+    
+    # 年化展期收益 (近似 carry_ret)
+    carry = safe_div(f1 - f2, f1, fill=0.0) / 60.0 * 365.0
+    # carry 的时序动量
+    carry_mom = carry - carry.shift(cycle)
+    
+    result = pd.DataFrame(index=engine.close.index, columns=engine.close.columns)
+    result[common_cols] = carry_mom
+    return result
+
+
+def calc_opening_gap_reversal(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
+    """开盘跳空反转 = 隔夜跳空幅度。大幅跳空后预期反向修复（IC-）"""
+    open_p = engine.open_price
+    close_prev = engine.close.shift(1)
+    gap = safe_div(open_p, close_prev, fill=1.0) - 1.0
+    # 取绝对跳空幅度（不区分方向，因子值越大表示跳空越剧烈）
+    return gap.abs().rolling(window=cycle, min_periods=cycle).mean()
