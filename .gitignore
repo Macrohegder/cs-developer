@@ -15,3 +15,12 @@ archive/
 # Python缓存
 __pycache__/
 *.pyc
+
+# factor_system generated files
+factor_system/data/
+factor_system/reports/
+factor_system/__pycache__/
+factor_system/factors/__pycache__/
+
+# external library
+CSstrategy_summary-master/
