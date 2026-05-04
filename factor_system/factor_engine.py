@@ -439,8 +439,14 @@ class FactorEngine:
     # =================================================================
     
     def _get_calc_function(self, name: str) -> Optional[Callable]:
-        """根据因子名获取对应的计算函数"""
-        # 从 batch_factors 模块导入
+        """根据因子名获取对应的计算函数
+        
+        支持后缀映射:
+          - xxx_889 -> calc_xxx (基于889数据计算，但计算逻辑相同)
+          - skew_180 -> calc_skew (cycle参数覆盖为180)
+          - skew_180_889 -> calc_skew (基于889数据，cycle=180)
+        """
+        # 1. 精确匹配
         try:
             from factors import batch_factors as bf
             fn = getattr(bf, f"calc_{name}", None)
@@ -449,7 +455,25 @@ class FactorEngine:
         except ImportError:
             pass
         
-        # 引擎内置计算函数
+        # 2. 处理后缀映射
+        base_name = name
+        # 去掉 _889 后缀
+        if base_name.endswith("_889"):
+            base_name = base_name[:-4]
+        # 去掉 _180 后缀 (skew_180 -> skew, skew_180_889 -> skew_889 -> skew)
+        if base_name.endswith("_180"):
+            base_name = base_name[:-4]
+        
+        if base_name != name:
+            try:
+                from factors import batch_factors as bf
+                fn = getattr(bf, f"calc_{base_name}", None)
+                if fn is not None:
+                    return fn
+            except ImportError:
+                pass
+        
+        # 3. 引擎内置计算函数
         return getattr(self, f"_calc_{name}", None)
     
     # =================================================================

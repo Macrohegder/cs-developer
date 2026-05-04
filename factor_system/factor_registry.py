@@ -611,7 +611,71 @@ BUILT_IN_FACTORS = [
         ic_direction=-1,
         backtest_price_suffix="888",
     ),
+    
+    # ==================== 889 版本（基于 889 数据计算因子值）====================
+    # 动态生成：为每个内置因子（除已带_889后缀的）创建 889 版本
 ]
+
+# 动态生成 _889 版本
+_BUILT_IN_889_FACTORS = []
+for _meta in BUILT_IN_FACTORS:
+    # 跳过已带 _889 后缀的
+    if _meta.name.endswith("_889"):
+        continue
+    
+    _889_params = _meta.params.copy()
+    # 如果是 carry 类，次主力也需要对应调整（889 的次主力用 889A2 不存在，用 88A2）
+    _889_meta = FactorMeta(
+        name=f"{_meta.name}_889",
+        category=_meta.category,
+        sub_category=_meta.sub_category,
+        description=f"[{_meta.name}] 基于 889 数据计算的版本。" + _meta.description,
+        params=_889_params,
+        data_requirements=_meta.data_requirements,
+        author=_meta.author,
+        source="cs_developer_889",
+        status=_meta.status,
+        lookback_days=_meta.lookback_days,
+        ic_direction=_meta.ic_direction,
+        backtest_price_suffix=_meta.backtest_price_suffix,
+        created_at=_meta.created_at,
+    )
+    _BUILT_IN_889_FACTORS.append(_889_meta)
+
+# 添加 skew 180 天版本（88 和 889）
+_skew_meta = next((m for m in BUILT_IN_FACTORS if m.name == "skew"), None)
+if _skew_meta:
+    _BUILT_IN_889_FACTORS.append(FactorMeta(
+        name="skew_180",
+        category="skewness",
+        sub_category="return_skew_longterm",
+        description="收益率偏度（180天长期版本）：衡量收益分布不对称性，捕捉更长期的崩盘风险溢价",
+        params={"cycle": 180},
+        data_requirements=["close_price"],
+        author="cs_developer",
+        source="cs_developer",
+        status=FactorStatus.ACTIVE,
+        lookback_days=180,
+        ic_direction=-1,
+        backtest_price_suffix="889",
+    ))
+    _BUILT_IN_889_FACTORS.append(FactorMeta(
+        name="skew_180_889",
+        category="skewness",
+        sub_category="return_skew_longterm",
+        description="收益率偏度（180天长期版本，基于889数据计算）：衡量收益分布不对称性",
+        params={"cycle": 180},
+        data_requirements=["close_price"],
+        author="cs_developer",
+        source="cs_developer_889",
+        status=FactorStatus.ACTIVE,
+        lookback_days=180,
+        ic_direction=-1,
+        backtest_price_suffix="889",
+    ))
+
+# 合并到内置因子库
+BUILT_IN_FACTORS.extend(_BUILT_IN_889_FACTORS)
 
 
 class FactorRegistry:
