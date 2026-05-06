@@ -24,3 +24,10 @@ factor_system/factors/__pycache__/
 
 # external library
 CSstrategy_summary-master/
+
+# Experiment logs and cache
+*.log
+*.pkl
+*_results.csv
+carry_*.csv
+factor_*.csv

@@ -509,3 +509,131 @@ def calc_opening_gap_reversal(engine: "FactorEngine", cycle: int = 20) -> pd.Dat
     gap = safe_div(open_p, close_prev, fill=1.0) - 1.0
     # 取绝对跳空幅度（不区分方向，因子值越大表示跳空越剧烈）
     return gap.abs().rolling(window=cycle, min_periods=cycle).mean()
+
+
+# =============================================================================
+# VIP33 因子集 (Idiosyncratic Asymmetry & Cross-Sectional)
+# 学术来源: Han et al. (2022) "Is idiosyncratic asymmetry priced in commodity futures?"
+# =============================================================================
+
+def _calc_idio_residuals(ret_df: pd.DataFrame, window: int) -> pd.DataFrame:
+    """
+    二次项市场模型滚动回归残差。
+    模型: r_i,t = alpha + beta1 * r_m,t + beta2 * r_m,t^2 + epsilon_i,t
+    市场基准 r_m = 各品种日收益率的截面等权均值（商品等权基准）
+    
+    返回:
+        DataFrame: 每个时间点的当期残差 epsilon（index=datetime, columns=symbols）
+    """
+    market_ret = ret_df.mean(axis=1).fillna(0).values
+    market_ret2 = market_ret ** 2
+    
+    residuals = pd.DataFrame(index=ret_df.index, columns=ret_df.columns, dtype=float)
+    
+    for col in ret_df.columns:
+        y = ret_df[col].fillna(0).values
+        n = len(y)
+        if n < window:
+            continue
+        
+        res_col = np.full(n, np.nan)
+        for t in range(window - 1, n):
+            y_win = y[t - window + 1:t + 1]
+            x1_win = market_ret[t - window + 1:t + 1]
+            x2_win = market_ret2[t - window + 1:t + 1]
+            
+            if np.std(y_win) < 1e-12:
+                continue
+            
+            X = np.column_stack([np.ones(window), x1_win, x2_win])
+            try:
+                beta = np.linalg.lstsq(X, y_win, rcond=None)[0]
+                res_col[t] = y_win[-1] - (beta[0] + beta[1] * x1_win[-1] + beta[2] * x2_win[-1])
+            except Exception:
+                continue
+        
+        residuals[col] = res_col
+    
+    return residuals
+
+
+def calc_amplitude(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
+    """
+    日内振幅因子 = mean((high - low) / close)
+    
+    直觉: 振幅太大的品种噪音太多，后续收益偏低（IC-）
+    """
+    amp = safe_div(engine.high - engine.low, engine.close, fill=0.0)
+    return amp.rolling(window=cycle, min_periods=cycle).mean()
+
+
+def calc_volume_momentum(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
+    """
+    成交量变化 = ln(volume_t / volume_{t-N})
+    
+    直觉: 成交量放大代表资金流入，有持续性（IC+）
+    """
+    vol = engine.volume.replace(0, np.nan)
+    return safe_log_ratio(vol, vol.shift(cycle), fill=0.0)
+
+
+def calc_ivol(engine: "FactorEngine", cycle: int = 60) -> pd.DataFrame:
+    """
+    特质波动率 (Idiosyncratic Volatility)
+    
+    构建规则:
+        1. 二次项市场模型: r_i = alpha + beta1*r_m + beta2*r_m^2 + epsilon
+        2. 市场基准 r_m = 商品等权基准（截面均值）
+        3. IVOL = std(残差) * sqrt(252)
+    
+    直觉: 特质风险高 = 被过度投机，后续收益偏低（IC-）
+    """
+    residuals = _calc_idio_residuals(engine.returns, cycle)
+    ivol = residuals.rolling(window=cycle, min_periods=cycle).std() * np.sqrt(252)
+    return ivol
+
+
+def calc_iskew(engine: "FactorEngine", cycle: int = 60) -> pd.DataFrame:
+    """
+    残差偏度 (Idiosyncratic Skewness)
+    
+    构建规则:
+        1. 二次项市场模型回归取残差（同 IVOL）
+        2. ISKEW = skew(残差)
+    
+    直觉: "彩票性"高的品种被追捧高估，后续收益偏低（IC-）
+    """
+    residuals = _calc_idio_residuals(engine.returns, cycle)
+    return residuals.rolling(window=cycle, min_periods=cycle).skew()
+
+
+def calc_ie(engine: "FactorEngine", cycle: int = 126, threshold: float = 0.5) -> pd.DataFrame:
+    """
+    特异非对称性 (Idiosyncratic Entropy, IE)
+    
+    学术来源: Han et al. (2022) SSRN.3391784
+    
+    构建规则:
+        1. 二次项市场模型回归取残差 epsilon（同 IVOL）
+        2. 残差标准化: z = (epsilon - mu_epsilon) / sigma_epsilon
+        3. IE = P(z > threshold) - P(z < -threshold)
+           （滚动窗口内，标准化残差大于正阈值的比例 减去 小于负阈值的比例）
+    
+    参数:
+        cycle: 126天（论文标准窗口）
+        threshold: 0.5（半个标准差的阈值）
+    
+    直觉: IE 高 = 暴涨概率比暴跌大 = 投资者争抢 = 被高估 = 后续收益低（IC-）
+    """
+    residuals = _calc_idio_residuals(engine.returns, cycle)
+    
+    # 滚动标准化残差
+    mu = residuals.rolling(window=cycle, min_periods=cycle).mean()
+    sigma = residuals.rolling(window=cycle, min_periods=cycle).std()
+    z_score = safe_div(residuals - mu, sigma, fill=0.0)
+    
+    # 尾部概率差异
+    upper_tail = (z_score > threshold).rolling(window=cycle, min_periods=cycle).mean()
+    lower_tail = (z_score < -threshold).rolling(window=cycle, min_periods=cycle).mean()
+    
+    return upper_tail - lower_tail
