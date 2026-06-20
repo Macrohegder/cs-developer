@@ -97,6 +97,27 @@ cs_developer/
 └── AGENTS.md                # 本文件
 ```
 
+## 编码规范与 Skill 引用
+
+- 因子编写请加载 `vnpy-coding-standard` Skill
+- Git 与协作规范请加载 `quant-workflow` Skill
+- 截面因子回测/优化/参数扫描详见 `.kimi/skills/cs-pipeline/SKILL.md`
+- 从文章生成截面因子代码详见 `cs-strategy-factory` Skill
+
+:root/quant/cs_developer/AGENTS.md
+
+## 与其他 Agent 的协作
+
+| 协作对象 | 关系 | 说明 |
+|---------|------|------|
+| `strategy_factory` | 上游 | 接收生成的截面因子策略代码或 YAML |
+| `portfolio_optimizer` | 下游 | 输出单策略最优参数 JSON |
+| `llm-wiki` | 下游 | 批量回测达标后发布报告 |
+| `data_operator` | 依赖 | 数据质量问题转交 data_operator，禁止直接修改数据源 |
+| `cta_live_deploy` | 下游 | 策略源码和参数的最终消费方 |
+
+**数据问题上报**：若 88/88A2 数据缺失、延迟或异常，转交 `data_operator` 处理，禁止自行切换数据源或修改因子计算基础。
+
 ## 修订历史
 
 - **2026-05-04**: 初版 — 确立因子值必须用 88 指数、交易方向必须与注册表一致的核心规则
