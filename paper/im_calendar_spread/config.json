@@ -1,0 +1,28 @@
+{
+  "account_id": "paper_im_calendar_spread",
+  "strategy_class": "EnhancedCalendarSpreadStrategy",
+  "framework": "vnpy_alpharesearch StrategyBacktester (daily)",
+  "scale_note": "1.5x 规模：研究口径 10M 的 1.5 倍（15M），手数由策略按 capital 自动缩放；2026-08-05 由 0.75x(7.5M) 上调（五腿组合优化结论：IM 跨月为组合中 Sharpe 最高、相关性最低的腿，边际至 1.5x 仍为正，目标仓位约 8 手/腿；组合保证金峰值 ~38%）。",
+  "capital": 15000000,
+  "products": [
+    "IM"
+  ],
+  "leverage": 2.0,
+  "capital_ratio": 1.0,
+  "direction": 1,
+  "vol_threshold": {
+    "IM": 0.15
+  },
+  "vol_window": 20,
+  "only_quarterly": true,
+  "roll_before_days": 5,
+  "use_quarterly_pair": false,
+  "dynamic_direction": false,
+  "stop_loss_pct": 0.0,
+  "take_profit_pct": 0.0,
+  "commission": 0.0001,
+  "data_start": "2022-07-22",
+  "paper_start_date": "2026-07-21",
+  "margin_per_lot_estimate": 168000,
+  "notes": "最优参数来自 cs_developer/docs/ic_im_vol_scan/OPTIMIZATION_REPORT.md（2026-07-15）；固定方向 +1 多近空远、只做季月合约、20 日年化波动 >=15% 才开仓"
+}

@@ -201,10 +201,17 @@ class FactorEngine:
             print(f"      映射记录: {self._dominant_df.shape}")
     
     def _get_data_symbol(self, dominant_symbol: str, suffix: str) -> str:
-        """将 dominant_symbol (如 RB88.SHFE) 转换为指定后缀的数据符号 (如 RB99.SHFE)"""
+        """将 dominant_symbol (如 RB88.SHFE / RB888.SHFE) 转换为指定后缀的数据符号 (如 RB99.SHFE)"""
         parts = dominant_symbol.split(".")
         exchange = parts[1]
-        symbol_base = parts[0].replace("88", "")  # "RB88" -> "RB"
+        symbol_code = parts[0]
+        # 去掉末尾的88或888，得到品种基础代码
+        if symbol_code.endswith("888"):
+            symbol_base = symbol_code[:-3]  # "RB888" -> "RB"
+        elif symbol_code.endswith("88"):
+            symbol_base = symbol_code[:-2]  # "RB88" -> "RB"
+        else:
+            symbol_base = symbol_code
         return f"{symbol_base}{suffix}.{exchange}"
     
     def _load_bar_data(self):
@@ -463,6 +470,9 @@ class FactorEngine:
         # 去掉 _180 后缀 (skew_180 -> skew, skew_180_889 -> skew_889 -> skew)
         if base_name.endswith("_180"):
             base_name = base_name[:-4]
+        # 去掉 _zscore 后缀 (ns_slope_zscore -> ns_slope)
+        if base_name.endswith("_zscore"):
+            base_name = base_name[:-7]
         
         if base_name != name:
             try:
@@ -473,7 +483,25 @@ class FactorEngine:
             except ImportError:
                 pass
         
-        # 3. 引擎内置计算函数
+        # 3. 从 ns_slope_factor 模块查找
+        if base_name.startswith("ns_"):
+            try:
+                from factors import ns_slope_factor as nsf
+                fn = getattr(nsf, f"calc_{base_name}", None)
+                if fn is not None:
+                    return fn
+            except ImportError:
+                pass
+            # 3b. 从 ns_slope_momentum_factor 模块查找
+            try:
+                from factors import ns_slope_momentum_factor as nsm
+                fn = getattr(nsm, f"calc_{base_name}", None)
+                if fn is not None:
+                    return fn
+            except ImportError:
+                pass
+        
+        # 4. 引擎内置计算函数
         return getattr(self, f"_calc_{name}", None)
     
     # =================================================================

@@ -187,13 +187,13 @@ BUILT_IN_FACTORS = [
         name="carry_ret",
         category="carry",
         sub_category="term_structure",
-        description="年化展期收益 = (F1-F2)/F1 / 到期日差 × 365。正值=Backwardation（远期贴水），负值=Contango（远期升水）",
+        description="精确年化展期收益 = (F2-F1)/F2 / 真实到期日差 × 365。使用真实主力/次主力合约到期日差，非固定60天。正值=Contango（远期升水），负值=Backwardation（远期贴水）",
         params={"cycle": 5},
         data_requirements=["close_price", "contract_expiry"],
-        author="CSstrategy_summary",
-        source="CSstrategy_summary",
+        author="long-short-term-strategy-revise",
+        source="cs_developer",
         lookback_days=5,
-        ic_direction=1,
+        ic_direction=-1,
     ),
     FactorMeta(
         name="carry_momentum",
@@ -302,6 +302,19 @@ BUILT_IN_FACTORS = [
         ic_direction=-1,
 
     ),
+    FactorMeta(
+        name="skew_180",
+        category="skewness",
+        sub_category="return_skew_longterm",
+        description="收益率偏度（180天长期版本）：衡量收益分布不对称性，捕捉更长期的崩盘风险溢价",
+        params={"cycle": 180},
+        data_requirements=["close_price"],
+        author="cs_developer",
+        source="cs_developer",
+        status=FactorStatus.ACTIVE,
+        lookback_days=180,
+        ic_direction=-1,
+    ),
     
     # ==================== 流动性类 (Liquidity) ====================
     FactorMeta(
@@ -378,6 +391,73 @@ BUILT_IN_FACTORS = [
         author="CSstrategy_summary",
         source="CSstrategy_summary",
         lookback_days=5,
+        ic_direction=1,
+    ),
+    
+    # ==================== Nelson-Siegel 期限结构类 (Term Structure) ====================
+    FactorMeta(
+        name="ns_slope",
+        category="term_structure",
+        sub_category="nelson_siegel",
+        description="Nelson-Siegel斜率因子 = slope变化的滚动平均。正值=斜率变陡(更backwardation)，负值=斜率变平(更contango)。基于Bianchi et al.(2023)论文",
+        params={"cycle": 5},
+        data_requirements=["close_price", "f2_close"],
+        author="ns_research",
+        source="literature",
+        references=["Bianchi et al., 2023, JBF, 'Exploiting the dynamics of commodity futures curves'"],
+        lookback_days=5,
+        ic_direction=1,
+    ),
+    FactorMeta(
+        name="ns_slope_zscore",
+        category="term_structure",
+        sub_category="nelson_siegel",
+        description="Nelson-Siegel斜率因子的Z-Score版本。更稳健的标准化信号",
+        params={"cycle": 20, "smooth": 5},
+        data_requirements=["close_price", "f2_close"],
+        author="ns_research",
+        source="literature",
+        references=["Bianchi et al., 2023, JBF"],
+        lookback_days=20,
+        ic_direction=1,
+    ),
+    FactorMeta(
+        name="ns_level",
+        category="term_structure",
+        sub_category="nelson_siegel",
+        description="Nelson-Siegel水平因子 = 主力连续价格变化的滚动平均。论文中L策略不盈利，作为对比",
+        params={"cycle": 5},
+        data_requirements=["close_price"],
+        author="ns_research",
+        source="literature",
+        references=["Bianchi et al., 2023, JBF"],
+        lookback_days=5,
+        ic_direction=1,
+    ),
+    FactorMeta(
+        name="ns_curvature",
+        category="term_structure",
+        sub_category="nelson_siegel",
+        description="Nelson-Siegel曲率因子 = 斜率变化的二阶差分。近似实现，需要3个合约点才能精确计算",
+        params={"cycle": 5},
+        data_requirements=["close_price", "f2_close"],
+        author="ns_research",
+        source="literature",
+        references=["Bianchi et al., 2023, JBF"],
+        lookback_days=5,
+        ic_direction=1,
+    ),
+    FactorMeta(
+        name="ns_slope_momentum",
+        category="term_structure",
+        sub_category="nelson_siegel",
+        description="Nelson-Siegel斜率动量因子 = 基于期限结构斜率的变化率（动量）而非绝对水平。适应中国市场非平稳特性（ADF p=0.618）",
+        params={"cycle": 5, "lookback_short": 5, "lookback_long": 20},
+        data_requirements=["close_price", "f2_close"],
+        author="ns_research",
+        source="literature",
+        references=["Bianchi et al., 2023, JBF"],
+        lookback_days=20,
         ic_direction=1,
     ),
     
@@ -558,6 +638,21 @@ BUILT_IN_FACTORS = [
 
     ),
     
+    # ==================== 研报复现因子 (Article Factors) ====================
+    FactorMeta(
+        name="cycle_reversion",
+        category="reversal",
+        sub_category="microstructure",
+        description="周而复始因子：基于收益率绝对值、成交量、持仓量三维'过热'程度的截面均值回复因子。对三指标分别截面rank后求和得到热度得分，高热度品种未来收益偏低（IC-）",
+        params={"cycle": 5},
+        data_requirements=["close_price", "volume", "open_interest"],
+        author="zhongtai_futures",
+        source="literature",
+        references=["中泰期货《周而复始因子研究报告》"],
+        lookback_days=5,
+        ic_direction=-1,
+    ),
+    
     # ==================== 现有 cs_developer 因子 ====================
     FactorMeta(
         name="spread_zscore",
@@ -686,71 +781,7 @@ BUILT_IN_FACTORS = [
         lookback_days=126,
         ic_direction=-1,
     ),
-    
-    # ==================== 889 版本（基于 889 数据计算因子值）====================
-    # 动态生成：为每个内置因子（除已带_889后缀的）创建 889 版本
 ]
-
-# 动态生成 _889 版本
-_BUILT_IN_889_FACTORS = []
-for _meta in BUILT_IN_FACTORS:
-    # 跳过已带 _889 后缀的
-    if _meta.name.endswith("_889"):
-        continue
-    
-    _889_params = _meta.params.copy()
-    # 如果是 carry 类，次主力也需要对应调整（889 的次主力用 889A2 不存在，用 88A2）
-    _889_meta = FactorMeta(
-        name=f"{_meta.name}_889",
-        category=_meta.category,
-        sub_category=_meta.sub_category,
-        description=f"[{_meta.name}] 基于 889 数据计算的版本。" + _meta.description,
-        params=_889_params,
-        data_requirements=_meta.data_requirements,
-        author=_meta.author,
-        source="cs_developer_889",
-        status=_meta.status,
-        lookback_days=_meta.lookback_days,
-        ic_direction=_meta.ic_direction,
-        # backtest_price_suffix removed - only full backtest is used
-        created_at=_meta.created_at,
-    )
-    _BUILT_IN_889_FACTORS.append(_889_meta)
-
-# 添加 skew 180 天版本（88 和 889）
-_skew_meta = next((m for m in BUILT_IN_FACTORS if m.name == "skew"), None)
-if _skew_meta:
-    _BUILT_IN_889_FACTORS.append(FactorMeta(
-        name="skew_180",
-        category="skewness",
-        sub_category="return_skew_longterm",
-        description="收益率偏度（180天长期版本）：衡量收益分布不对称性，捕捉更长期的崩盘风险溢价",
-        params={"cycle": 180},
-        data_requirements=["close_price"],
-        author="cs_developer",
-        source="cs_developer",
-        status=FactorStatus.ACTIVE,
-        lookback_days=180,
-        ic_direction=-1,
-
-    ))
-    _BUILT_IN_889_FACTORS.append(FactorMeta(
-        name="skew_180_889",
-        category="skewness",
-        sub_category="return_skew_longterm",
-        description="收益率偏度（180天长期版本，基于889数据计算）：衡量收益分布不对称性",
-        params={"cycle": 180},
-        data_requirements=["close_price"],
-        author="cs_developer",
-        source="cs_developer_889",
-        status=FactorStatus.ACTIVE,
-        lookback_days=180,
-        ic_direction=-1,
-
-    ))
-
-# 合并到内置因子库
-BUILT_IN_FACTORS.extend(_BUILT_IN_889_FACTORS)
 
 
 class FactorRegistry:

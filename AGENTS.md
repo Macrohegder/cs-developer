@@ -57,6 +57,49 @@
 - 99：无负价格，但换月行为与真实交易不一致
 - 只有真实合约映射才能准确反映交易成本、换月滑点和持仓连续性
 
+### 规则 4：只消费已入库数据，禁止直连 RQData
+
+> **cs_developer 只读取 vnpy DB 中已入库的数据；任何国内期货/ETF/股票数据的下载、补数、修复都必须通过 `rq_data` 或 `data_operator`，禁止在 cs_developer 中直接调用 RQData、akshare、tushare、新浪财经、中金所官网、手动 CSV、爬虫等非授权数据源。**
+
+**禁止事项：**
+- ❌ 禁止直接 `import rqdatac` 并调用 `get_price` 下载数据
+- ❌ 禁止直接写入、删除、修改 vnpy bar 库
+- ❌ 禁止因数据缺失而临时切换数据源自行补数
+
+**允许事项：**
+- ✅ 通过 `vnpy_alpharesearch` / `vnpy` 标准接口读取已入库 bar 数据
+- ✅ 通过 `DataCenter.load_reference_df` 读取已入库的合约映射等参考数据
+- ✅ 发现数据质量问题后上报 `data_operator`，由其统一修复
+
+**原因：**
+- 国内数据唯一授权入口为 `/root/quant/rq_data/download_cn_rqdata.py`
+- 数据下载、清洗、修复属于 `rq_data` / `data_operator` 职责，策略研发 Agent 不应越界
+- 在策略脚本中直接补数会造成多 Agent 数据源不一致、难以审计
+
+### 规则 5：禁止绕过 vnpy 回测框架进行简化回测
+
+> **所有策略回测必须通过 `vnpy_alpharesearch` 的 `StrategyBacktester` + 标准 `StrategyTemplate` 完成；禁止在 cs_developer 中编写或使用任何绕过该框架的“简化回测”脚本。**
+
+**禁止事项：**
+- ❌ 禁止手写循环计算每日盈亏、累计收益、夏普等所谓“简化回测”
+- ❌ 禁止使用 `load_bar_df` 读取收盘价后自行撮合、调仓、计手续费
+- ❌ 禁止以“快速验证”“口径对齐”“交叉核对”等理由输出非 StrategyBacktester 框架的回测绩效
+
+**允许事项：**
+- ✅ 使用 `StrategyBacktester` + 自定义 `StrategyTemplate` 实现新策略逻辑
+- ✅ 在 StrategyBacktester 框架内做参数扫描、敏感性分析、成本压力测试
+- ✅ 使用 `calculate_portfolio_performance` 等框架内置绩效分析工具
+
+**原因：**
+- 简化回测按收盘价无滑点成交，系统性高估收益、低估回撤
+- 自行实现的手续费、换月、保证金、乘数等细节与实盘存在偏差，容易误导决策
+- 只有 StrategyBacktester 统一处理 open-to-close 交易盈亏、close-to-close 持仓盈亏、合约乘数和真实调仓，结果才可作为生产决策依据
+
+## 回测后审计
+
+- 所有 `StrategyBacktester` 完整回测完成后，必须调用 `backtest_audit.backtest_verifier.BacktestAuditor` 对 `target_df` 做执行语义核对。
+- 审计报告保存为 `result_{factor_name}_audit_report.json`，`error` 级别违规需人工确认后才能作为生产决策依据。
+
 ## 代码修改约束
 
 ### FactorEngine 默认值
@@ -93,7 +136,7 @@ cs_developer/
 │   ├── run_backtest_skew.py         # 完整版回测
 │   └── ...
 ├── run_backtest_unified.py  # 统一回测入口（完整版）
-├── archive/                 # 过时脚本归档（gitignore）
+├── archive/                 # 过时脚本归档；其中 `download_rqdata.py`、`fetch_contract_info.py` 已标记为 DEPRECATED_RQDATA_BANNED
 └── AGENTS.md                # 本文件
 ```
 
@@ -113,12 +156,14 @@ cs_developer/
 | `strategy_factory` | 上游 | 接收生成的截面因子策略代码或 YAML |
 | `portfolio_optimizer` | 下游 | 输出单策略最优参数 JSON |
 | `llm-wiki` | 下游 | 批量回测达标后发布报告 |
-| `data_operator` | 依赖 | 数据质量问题转交 data_operator，禁止直接修改数据源 |
+| `data_operator` | 依赖/上游 | 数据下载、补数、清洗、修复的统一入口；cs_developer 只消费已入库数据 |
 | `cta_live_deploy` | 下游 | 策略源码和参数的最终消费方 |
 
-**数据问题上报**：若 88/88A2 数据缺失、延迟或异常，转交 `data_operator` 处理，禁止自行切换数据源或修改因子计算基础。
+**数据问题上报**：若 88/88A2 数据缺失、延迟或异常，转交 `data_operator` / `rq_data` 处理，禁止自行切换数据源、直连 RQData 或修改 bar 库。
 
 ## 修订历史
 
 - **2026-05-04**: 初版 — 确立因子值必须用 88 指数、交易方向必须与注册表一致的核心规则
 - **2026-05-04**: 移除所有简化回测代码 — 确认 888/889/99 指数均存在不可弥补的结构性偏差，只保留 StrategyBacktester 完整回测
+- **2026-07-07**: 新增规则 4 — 明确 cs_developer 只消费已入库数据，禁止直连 RQData；迁移违规脚本到 `rq_data` / `data_operator`，原位置保留转发 shim
+- **2026-07-15**: 新增规则 5 — 禁止绕过 vnpy 回测框架进行简化回测，防止简化口径误导绩效评估

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-批量因子计算 — 80 个因子（39×2 + skew_180×2）
+批量因子计算 — 基于 88/88A2 的因子值计算
 
 执行逻辑：
-1. 创建 FactorEngine(88) 计算所有非 _889 因子（40 个）
-2. 创建 FactorEngine(889) 计算所有 _889 因子（40 个）
-3. 保存到 DataCenter
+1. 创建 FactorEngine(88) 计算所有活跃因子
+2. 保存到 DataCenter
 
 用法：
     python run_batch_compute.py --start 2020-01-01 --end 2024-12-31
@@ -66,9 +65,9 @@ def parse_args():
 def compute_factors_batch(suffix, factor_names, symbols, start, end, output_dir):
     """用指定 suffix 的引擎批量计算因子并保存"""
     
-    is_carry = lambda n: n.replace("_889", "").startswith(("carry_", "spread_"))
+    is_carry = lambda n: n.startswith(("carry_", "spread_"))
     
-    sec_suffix = "88A2"  # 次主力始终用 88A2（889A2 不存在）
+    sec_suffix = "88A2"  # 次主力始终用 88A2
     
     print(f"\n{'='*70}")
     print(f"批量计算: suffix={suffix}, 因子数={len(factor_names)}")
@@ -134,21 +133,13 @@ def main():
         cats = set(args.categories.split(","))
         all_factors = [m for m in all_factors if m.category in cats]
     
-    # 分离 88 版本和 889 版本
-    factors_88 = [m.name for m in all_factors if not m.name.endswith("_889")]
-    factors_889 = [m.name for m in all_factors if m.name.endswith("_889")]
+    factor_names = [m.name for m in all_factors]
     
     print(f"总因子数: {len(all_factors)}")
-    print(f"  88 版本: {len(factors_88)}")
-    print(f"  889 版本: {len(factors_889)}")
     
-    # 计算 88 版本
-    if factors_88:
-        compute_factors_batch("88", factors_88, DEFAULT_SYMBOLS, start, end, output_dir)
-    
-    # 计算 889 版本
-    if factors_889:
-        compute_factors_batch("889", factors_889, DEFAULT_SYMBOLS, start, end, output_dir)
+    # 计算所有因子
+    if factor_names:
+        compute_factors_batch("88", factor_names, DEFAULT_SYMBOLS, start, end, output_dir)
     
     print(f"\n{'='*70}")
     print("[OK] 全部因子计算完成")

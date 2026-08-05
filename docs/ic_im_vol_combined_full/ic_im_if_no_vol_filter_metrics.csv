@@ -1,0 +1,2 @@
+name,total_pnl,total_return,annual_return,max_dd,sharpe,calmar,win_rate,profit_days,loss_days,days
+IC+IM+IF no_vol_filter (full),218897.57,0.021889757399999876,0.005688606392931361,-0.018623153987548168,0.4339013603622308,0.3054588066411781,0.5258467023172906,295,266,962

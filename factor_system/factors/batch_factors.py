@@ -117,26 +117,48 @@ def calc_reversal(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
 # =============================================================================
 
 def calc_carry_ret(engine: "FactorEngine", cycle: int = 5) -> pd.DataFrame:
-    """年化展期收益 = (F1-F2)/F1 / 到期日差 × 365
+    """精确年化展期收益 = (F2-F1)/F2 / 真实到期日差 × 365
     
-    与 CSstrategy_summary 原始定义一致：
-    - carry > 0 表示 Backwardation（主力>次主力，远期贴水）
-    - carry < 0 表示 Contango（主力<次主力，远期升水）
-    标准策略：做多高 carry（Backwardation），做空低 carry（Contango）
+    与 /root/long-short-term-strategy-revise/carry_factor.py 原始定义一致：
+    - 使用真实主力/次主力合约的到期日差（非固定60天）
+    - carry > 0 表示 Contango（次主力>主力，远期升水）
+    - carry < 0 表示 Backwardation（次主力<主力，远期贴水）
+    标准策略：做多低 carry（Backwardation），做空高 carry（Contango）
     """
     f1 = engine.close
     f2 = engine.f2_close
     if f2 is None or f2.empty:
         return pd.DataFrame(index=f1.index, columns=f1.columns)
     
-    # 对齐列：只保留共同品种
     common_cols = f1.columns.intersection(f2.columns)
     f1 = f1[common_cols]
     f2 = f2[common_cols]
     
-    # 截面统一假设到期日差为 60 天（简化）
-    carry = safe_div(f1 - f2, f1, fill=0.0) / 60.0 * 365.0
-    # 扩展回原始列
+    # 获取真实到期日差
+    dominant_df = getattr(engine, '_dominant_df', None)
+    expiry_map = getattr(engine, '_expiry_map', {})
+    
+    if dominant_df is not None and expiry_map:
+        delta_df = pd.DataFrame(index=f1.index, columns=common_cols, dtype=float)
+        for col in common_cols:
+            key1 = f"{col}@1"
+            key2 = f"{col}@2"
+            if key1 not in dominant_df.columns or key2 not in dominant_df.columns:
+                continue
+            # 提取合约代码（去掉交易所后缀）
+            s1 = dominant_df[key1].astype(str).str.split('.').str[0]
+            s2 = dominant_df[key2].astype(str).str.split('.').str[0]
+            # 映射到期日
+            exp1 = pd.to_datetime(s1.map(expiry_map))
+            exp2 = pd.to_datetime(s2.map(expiry_map))
+            delta = (exp2 - exp1).dt.days
+            delta_df[col] = delta.where(delta > 0, 60.0)
+        delta_df = delta_df.fillna(60.0)
+    else:
+        delta_df = pd.DataFrame(60.0, index=f1.index, columns=common_cols)
+    
+    carry = safe_div(f2 - f1, f2, fill=0.0) / delta_df * 365.0
+    
     result = pd.DataFrame(index=engine.close.index, columns=engine.close.columns)
     result[common_cols] = carry
     return result
@@ -483,23 +505,10 @@ def calc_speculation_ratio(engine: "FactorEngine", cycle: int = 20) -> pd.DataFr
 
 def calc_term_structure_slope(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
     """期限结构斜率动量 = carry_ret 的时序动量。捕捉期限结构变化的持续性"""
-    f1 = engine.close
-    f2 = engine.f2_close
-    if f2 is None or f2.empty:
-        return pd.DataFrame(index=f1.index, columns=f1.columns)
-    
-    common_cols = f1.columns.intersection(f2.columns)
-    f1 = f1[common_cols]
-    f2 = f2[common_cols]
-    
-    # 年化展期收益 (近似 carry_ret)
-    carry = safe_div(f1 - f2, f1, fill=0.0) / 60.0 * 365.0
+    # 复用 calc_carry_ret 的精确 carry 计算（真实到期日差）
+    carry = calc_carry_ret(engine, cycle=5)
     # carry 的时序动量
-    carry_mom = carry - carry.shift(cycle)
-    
-    result = pd.DataFrame(index=engine.close.index, columns=engine.close.columns)
-    result[common_cols] = carry_mom
-    return result
+    return carry - carry.shift(cycle)
 
 
 def calc_opening_gap_reversal(engine: "FactorEngine", cycle: int = 20) -> pd.DataFrame:
@@ -637,3 +646,59 @@ def calc_ie(engine: "FactorEngine", cycle: int = 126, threshold: float = 0.5) ->
     lower_tail = (z_score < -threshold).rolling(window=cycle, min_periods=cycle).mean()
     
     return upper_tail - lower_tail
+
+
+# =============================================================================
+# 文章因子 (Article / 研报复现)
+# =============================================================================
+
+def calc_cycle_reversion(engine: "FactorEngine", cycle: int = 5) -> pd.DataFrame:
+    """
+    周而复始因子 — 期货品种交易"过热"程度的微观结构因子
+    
+    来源: 中泰期货《周而复始因子研究报告》（微信公众号）
+    
+    构建规则:
+        1. N日收益率绝对值: |close_t / close_{t-N} - 1|
+        2. N日成交量对数变化率: ln(volume_t / volume_{t-N})
+        3. N日持仓量对数变化率: ln(oi_t / oi_{t-N})
+        4. 对三个指标分别做截面rank（0~1），解决正负值无法线性组合的问题
+        5. 热度得分 = rank(|ret|) + rank(vol_chg) + rank(oi_chg)
+    
+    经济学逻辑:
+        当品种出现"收益率绝对值、成交量、持仓量齐升"时，市场呈现"过热"状态。
+        期货作为套期保值工具，在过热行情中会发挥对冲功能，导致价格朝相反方向回复。
+        因此该因子为负向因子：高热度品种未来收益低，低热度品种未来收益高。
+    
+    参数:
+        cycle: 回看周期（日），默认5天（对应周度调仓）
+    
+    交易方向: ic_direction = -1（做多低热度，做空高热度）
+    """
+    close = engine.close
+    volume = engine.volume.replace(0, np.nan)
+    oi = engine.open_interest.replace(0, np.nan)
+    
+    # 1. N日收益率绝对值
+    ret = safe_div(close, close.shift(cycle), fill=1.0) - 1.0
+    abs_ret = ret.abs()
+    
+    # 2. N日成交量对数变化率
+    vol_chg = safe_log_ratio(volume, volume.shift(cycle), fill=0.0)
+    
+    # 3. N日持仓量对数变化率
+    oi_chg = safe_log_ratio(oi, oi.shift(cycle), fill=0.0)
+    
+    # 4. 截面rank（0~1），NaN保持NaN
+    def cross_sectional_rank(df):
+        return df.rank(axis=1, pct=True, na_option='keep')
+    
+    rank_abs_ret = cross_sectional_rank(abs_ret)
+    rank_vol_chg = cross_sectional_rank(vol_chg)
+    rank_oi_chg = cross_sectional_rank(oi_chg)
+    
+    # 5. 热度得分 = 三者之和（越大表示越"过热"）
+    # 对NaN用0.5填充（中性值），确保即使某个指标缺失也能计算
+    heat_score = rank_abs_ret.fillna(0.5) + rank_vol_chg.fillna(0.5) + rank_oi_chg.fillna(0.5)
+    
+    return heat_score

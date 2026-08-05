@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "rules_run": [
+    "no_trade_on_missing_data",
+    "max_gross_exposure"
+  ],
+  "violations": [],
+  "summary": {
+    "total_violations": 0,
+    "by_severity": {
+      "error": 0,
+      "warning": 0,
+      "info": 0
+    },
+    "by_rule": {}
+  },
+  "context": {
+    "engine_type": "cs",
+    "tags": {
+      "strategy_type": "daily",
+      "direction": 0,
+      "allowed_direction": "both"
+    },
+    "capital": 10000000.0,
+    "settings": {
+      "default_contract_multiplier": 200,
+      "max_gross_exposure": 2.0
+    }
+  }
+}

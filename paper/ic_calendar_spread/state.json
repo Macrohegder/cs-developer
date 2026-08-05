@@ -1,0 +1,22 @@
+{
+  "account_id": "paper_ic_calendar_spread",
+  "signal_date": "2026-08-05",
+  "position": {
+    "near": "IC2609.CFFEX",
+    "far": "IC2612.CFFEX",
+    "near_lots": 2,
+    "far_lots": -2
+  },
+  "prices": {
+    "near": 7744.4,
+    "far": 7597.0,
+    "spread_pct": 0.019033107794018858
+  },
+  "vol20": 0.44824554310383935,
+  "spread_percentile": 0.432,
+  "carry_annual": 0.07634158620677893,
+  "alerts": [],
+  "paper_equity": 4988000.0,
+  "cum_pnl": -12000.0,
+  "updated_at": "2026-08-05T19:37:22.892267+08:00"
+}

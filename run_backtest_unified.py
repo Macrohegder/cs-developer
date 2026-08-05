@@ -34,6 +34,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "factor_system"))
 
+# 强制引入数据库配置守卫（禁止运行时切换数据库）
+from factor_system import db_guard  # noqa: F401
+
 import argparse
 import traceback
 from datetime import datetime
@@ -47,6 +50,7 @@ from vnpy_alpharesearch.strategy import StrategyBacktester, calculate_portfolio_
 from strategies.cross_sectional_strategy import CrossSectionalStrategy
 from factor_system.factor_registry import get_registry
 from factor_system.factor_engine import FactorEngine
+from backtest_audit.backtest_verifier import BacktestAuditor
 
 
 DEFAULT_SYMBOLS = [
@@ -112,6 +116,8 @@ def parse_args():
                         help="无风险利率（默认 0）")
     parser.add_argument("--plot-chart", action="store_true",
                         help="是否绘制图表")
+    parser.add_argument("--in-sample-ratio", type=float, default=1.0,
+                        help="IS 数据占比（默认1.0=全样本，0.7=70%% IS + 30%% OOS）")
 
     # 批量与自动化
     parser.add_argument("--batch", action="store_true",
@@ -122,9 +128,9 @@ def parse_args():
                         help="因子缺失时自动计算并入库")
     parser.add_argument("--check-only", action="store_true",
                         help="只检查数据准备情况，不执行回测")
-    parser.add_argument("--primary-suffix", type=str, default="99",
+    parser.add_argument("--primary-suffix", type=str, default="88",
                         help="自动计算时使用的主力连续后缀（默认 99）")
-    parser.add_argument("--secondary-suffix", type=str, default="889",
+    parser.add_argument("--secondary-suffix", type=str, default="88A2",
                         help="自动计算时使用的次主力连续后缀（默认 889）")
 
     return parser.parse_args()
@@ -188,8 +194,8 @@ def auto_compute_factor(
     symbols: List[str],
     start: datetime,
     end: datetime,
-    primary_suffix: str = "99",
-    secondary_suffix: str = "889",
+    primary_suffix: str = "88",
+    secondary_suffix: str = "88A2",
     verbose: bool = True
 ) -> bool:
     """自动计算缺失因子并保存到 DataCenter"""
@@ -247,7 +253,8 @@ def run_single_backtest(
     risk_free: float,
     plot_chart: bool,
     symbols: List[str],
-    verbose: bool = True
+    verbose: bool = True,
+    in_sample_ratio: float = 1.0,
 ) -> Optional[Dict]:
     """执行单个因子的完整回测"""
 
@@ -298,6 +305,33 @@ def run_single_backtest(
     # 6. 绩效分析
     if verbose:
         print("\n[Step 3] 绩效分析...")
+    
+    # IS-OOS 切分（如果指定）
+    is_stats = None
+    oos_stats = None
+    if in_sample_ratio < 1.0 and len(target_df) >= 30:
+        split_idx = int(len(target_df) * in_sample_ratio)
+        if split_idx >= 10 and (len(target_df) - split_idx) >= 10:
+            is_df = target_df.iloc[:split_idx]
+            oos_df = target_df.iloc[split_idx:]
+            
+            is_result = calculate_portfolio_performance(
+                is_df, Interval.DAILY, commission=commission,
+                capital=capital, risk_free=risk_free, plot_chart=False
+            )
+            oos_result = calculate_portfolio_performance(
+                oos_df, Interval.DAILY, commission=commission,
+                capital=capital, risk_free=risk_free, plot_chart=False
+            )
+            
+            is_stats = is_result["statistics"]
+            oos_stats = oos_result["statistics"]
+            
+            if verbose:
+                print(f"\n  [IS-OOS 切分] IS={len(is_df)}天, OOS={len(oos_df)}天")
+                print(f"  IS Sharpe: {is_stats.get('sharpe_ratio', 'N/A')}")
+                print(f"  OOS Sharpe: {oos_stats.get('sharpe_ratio', 'N/A')}")
+    
     result = calculate_portfolio_performance(
         target_df,
         Interval.DAILY,
@@ -308,6 +342,15 @@ def run_single_backtest(
     )
 
     stats = result["statistics"]
+    
+    # 附加 IS-OOS 指标到 stats
+    if is_stats and oos_stats:
+        stats["is_sharpe_ratio"] = is_stats.get("sharpe_ratio")
+        stats["oos_sharpe_ratio"] = oos_stats.get("sharpe_ratio")
+        is_sharpe = float(is_stats.get("sharpe_ratio", 0) or 0)
+        oos_sharpe = float(oos_stats.get("sharpe_ratio", 0) or 0)
+        stats["sharpe_decay_ratio"] = round(oos_sharpe / is_sharpe, 4) if abs(is_sharpe) > 1e-6 else 0.0
+    
     if verbose:
         print("\n【完整回测绩效指标】")
         for key, value in stats.items():
@@ -320,6 +363,33 @@ def run_single_backtest(
     result["product"].to_csv(f"{prefix}_product.csv")
     if verbose:
         print(f"\n[OK] 结果已保存到 {prefix}_*.csv")
+
+    # 8. 回测执行语义审计
+    try:
+        tags = {
+            "strategy_type": "daily",
+            "direction": 0,
+            "allowed_direction": "both",
+            "long_low": long_low,
+        }
+        auditor = BacktestAuditor()
+        audit_report = auditor.run_from_cs_target_df(
+            target_df,
+            tags=tags,
+            capital=capital,
+        )
+        audit_path = f"{prefix}_audit_report.json"
+        with open(audit_path, "w", encoding="utf-8") as f:
+            json.dump(audit_report.to_dict(), f, indent=2, ensure_ascii=False)
+        stats["_audit_report_path"] = audit_path
+        stats["_audit_passed"] = audit_report.passed
+        if verbose:
+            print(f"[OK] 审计报告已保存: {audit_path}, passed={audit_report.passed}")
+            if not audit_report.passed:
+                print(f"[WARN] 审计发现 {audit_report.summary['total_violations']} 处违规")
+    except Exception as e:
+        if verbose:
+            print(f"[WARN] 审计步骤失败: {e}")
 
     return {
         "factor_name": factor_name,
@@ -437,7 +507,8 @@ def main():
             risk_free=args.risk_free,
             plot_chart=args.plot_chart,
             symbols=DEFAULT_SYMBOLS,
-            verbose=True
+            verbose=True,
+            in_sample_ratio=args.in_sample_ratio,
         )
 
         if result:
