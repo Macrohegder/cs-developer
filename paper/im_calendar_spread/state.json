@@ -1,24 +1,24 @@
 {
   "account_id": "paper_im_calendar_spread",
-  "signal_date": "2026-08-05",
+  "signal_date": "2026-09-21",
   "position": {
-    "near": "IM2609.CFFEX",
-    "far": "IM2612.CFFEX",
-    "near_lots": 8,
-    "far_lots": -8
+    "near": "IM2612.CFFEX",
+    "far": "IM2703.CFFEX",
+    "near_lots": 23,
+    "far_lots": -23
   },
   "prices": {
-    "near": 7433.8,
-    "far": 7269.0,
-    "spread_pct": 0.022169011810917724
+    "near": 7560.6,
+    "far": 7357.8,
+    "spread_pct": 0.026823267994603626
   },
-  "vol20": 0.459807828796894,
-  "spread_percentile": 0.24,
-  "carry_annual": 0.0889196627580766,
-  "alerts": [
-    "🟡 carry 变薄：价差率 2.22%（分位 24%），毛 carry 8.9%，新开仓性价比偏低"
-  ],
-  "paper_equity": 14944960.0,
-  "cum_pnl": -55039.99999999942,
-  "updated_at": "2026-08-05T19:35:30.275499+08:00"
+  "vol20": 0.17271128156449495,
+  "spread_percentile": 0.284,
+  "carry_annual": 0.10758783316516839,
+  "alerts": [],
+  "notices": [],
+  "scale_blocked": null,
+  "paper_equity": 34945212.720000006,
+  "cum_pnl": -54787.27999999707,
+  "updated_at": "2026-09-22T10:34:54.789683+08:00"
 }

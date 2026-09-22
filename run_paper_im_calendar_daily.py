@@ -12,7 +12,8 @@ IM 日历价差策略 — paper 日度信号与盈亏跟踪（半规模 5M）
    - 明细:  paper/im_calendar_spread/daily_pnl.csv
    - 日报:  tasks/results/{信号日期}-daily_pnl-paper_im_calendar_spread.md
 
-调度：系统 crontab 每日 01:30（在 23:00 RQData 更新任务完成之后）。
+调度：系统 crontab 工作日 19:35（IM）/ 19:37（IC）/ 19:39（IH），收盘后自 RQData 补齐数据。
+多品种/合约对口径由 --config 驱动；config 声明 pair_mode 时按策略实际选腿提取信号与分位。
 """
 
 import json
@@ -49,7 +50,7 @@ from vnpy.trader.database import get_database
 from vnpy.trader.datafeed import get_datafeed
 from vnpy.trader.utility import ZoneInfo
 from vnpy_alpharesearch import DataCenter
-from vnpy_alpharesearch.utility import load_history_df
+from vnpy_alpharesearch.utility import load_bar_df, load_history_df
 from vnpy_alpharesearch.strategy.backtester import StrategyBacktester
 from vnpy_alpharesearch.strategy.analysis import calculate_portfolio_performance
 
@@ -78,6 +79,9 @@ COMMISSION = CONFIG["commission"]
 PAPER_START = pd.Timestamp(CONFIG["paper_start_date"])
 START = datetime.strptime(CONFIG["data_start"], "%Y-%m-%d")
 ACCOUNT_ID = CONFIG.get("account_id", PAPER_DIR.name)
+# 合约对选择模式（空 = dominant @1/@2 原行为；非空如 quarter_second_quarter 时
+# 信号提取、数据回补与 carry 分位口径均切换为策略实际选腿口径）
+PAIR_MODE = CONFIG.get("pair_mode", "")
 
 # 研究口径 10M → 半规模 5M：覆盖被复用模块中的资金常量
 sig.CAPITAL = CAPITAL
@@ -89,16 +93,22 @@ sig.PRODUCTS = PRODUCTS
 # ---------------------------------------------------------------------------
 
 def ensure_contract_daily_bars(symbols: list[str]) -> dict:
-    """通过 RQData 补齐指定合约的日线到最新，返回 {symbol: 写入条数}"""
+    """通过 RQData 补齐指定合约的日线到最新，返回 {symbol: 写入条数}
+
+    连续合约（88/888/889/99/88A2）显式 adjust_type='pre'，
+    与 rq_data/download_cn_rqdata.py 的连续合约口径一致（默认 none 会在换月处留跳价）。
+    """
     import rqdatac as rq
     from clickhouse_driver import Client
 
+    CONT_SUFFIXES = ("88A2", "888", "889", "88", "99")
     client = Client(host="localhost")
     db = get_database()
     written = {}
     fields = ["open", "high", "low", "close", "volume", "total_turnover", "open_interest"]
     for vt_symbol in symbols:
         symbol, exchange = vt_symbol.split(".")
+        adjust_type = "pre" if symbol.endswith(CONT_SUFFIXES) else "none"
         rows = client.execute(
             "SELECT max(datetime) FROM vnpy.bar_data WHERE symbol=%(s)s AND interval='d'",
             {"s": symbol},
@@ -109,8 +119,16 @@ def ensure_contract_daily_bars(symbols: list[str]) -> dict:
         if start_d > end_d:
             written[vt_symbol] = 0
             continue
-        df = rq.get_price(symbol, start_date=start_d.strftime("%Y%m%d"),
-                          end_date=end_d.strftime("%Y%m%d"), frequency="1d", fields=fields)
+        try:
+            df = rq.get_price(symbol, start_date=start_d.strftime("%Y%m%d"),
+                              end_date=end_d.strftime("%Y%m%d"), frequency="1d",
+                              fields=fields, adjust_type=adjust_type)
+        except ValueError as e:
+            # 季月回补候选可能包含尚未挂牌的合约（交易所当前未列出），
+            # rqdatac 视为非法 instrument 抛 ValueError，跳过即可
+            print(f"[跳过] {vt_symbol}: {e}")
+            written[vt_symbol] = 0
+            continue
         if df is None or df.empty:
             written[vt_symbol] = 0
             continue
@@ -166,7 +184,27 @@ def run_strategy(latest: datetime):
     contract_df["exchange"] = contract_df["exchange"].astype(str)
 
     data_cache = {p: sig.prepare_product_data(p, contract_df, latest) for p in PRODUCTS}
+    # 连续序列计算铁律（2026-08-08 起）：vol 过滤序列改用 889 后复权连续，
+    # 禁止 88 主力连续（换月跳价污染 20 日 vol）。88 仍用于最新交易日定位与主力映射。
+    for p in PRODUCTS:
+        idx889_df = load_bar_df(f"{p}889.CFFEX", Interval.DAILY, START, latest)
+        if hasattr(idx889_df.index, "tz_localize"):
+            idx889_df.index = idx889_df.index.tz_localize(None)
+        data_cache[p]["idx_close"] = idx889_df["close_price"]
     all_contracts = sorted(set(c for p in PRODUCTS for c in data_cache[p]["contracts"]))
+    if PAIR_MODE:
+        # pair_mode 选腿不经过主力映射：最新远季月腿可能尚未进入 @1/@2 映射
+        # （如 2026-09 换月后 IM2703 流动性低于 IM2610），需按合约表补齐全部
+        # 未到期合约，否则换月后策略看不到远腿而误空仓；无日线入库的合约除外
+        # （load_bar_df 对空表报错）
+        extra = {c for p in PRODUCTS for c in sig.get_all_product_contracts(p, contract_df, START)}
+        if extra:
+            from clickhouse_driver import Client as _CHClient
+            rows = _CHClient(host="localhost").execute(
+                "SELECT DISTINCT symbol FROM vnpy.bar_data WHERE interval='d' AND symbol IN %(s)s",
+                {"s": [c.split(".")[0] for c in extra]})
+            have = {r[0] for r in rows}
+            all_contracts = sorted(set(all_contracts) | {c for c in extra if c.split(".")[0] in have})
     history_df = load_history_df(all_contracts, Interval.DAILY, START, latest)
 
     backtester = StrategyBacktester(vt_symbols=all_contracts, interval=Interval.DAILY,
@@ -210,6 +248,7 @@ def run_strategy(latest: datetime):
         "use_quarterly_pair": CONFIG["use_quarterly_pair"],
         "dynamic_direction": CONFIG["dynamic_direction"],
         "direction": CONFIG["direction"],
+        "pair_mode": PAIR_MODE,
     }
     target_df = backtester.run_backtesting(EnhancedCalendarSpreadStrategy, setting)
     result = calculate_portfolio_performance(
@@ -277,6 +316,90 @@ def compute_spread_metrics(mapping: pd.DataFrame, close_df: pd.DataFrame,
     return {"percentile": percentile, "carry": carry, "n": len(rates)}
 
 
+def _upcoming_quarter_symbols(product: str, latest: datetime, n: int = 3) -> list[str]:
+    """pair_mode 季月模式的数据回补候选：latest 之后到期的最近 n 个季月合约"""
+    out = []
+    y, m = latest.year, latest.month
+    while len(out) < n:
+        if m in (3, 6, 9, 12) and _third_friday(y, m) > latest.date():
+            out.append(f"{product}{y % 100:02d}{m:02d}.CFFEX")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out
+
+
+def _pick_quarter_pair(close_df: pd.DataFrame, product: str, dt) -> tuple:
+    """按 quarter_second_quarter 口径在 dt 当日选腿（未到期、当季有效收盘价的
+    前两个季月合约）。仅用于报告展示与分位口径；真实仓位以 target_df 为准。"""
+    cands = []
+    for s in close_df.columns:
+        code = str(s).split(".")[0]
+        if not str(s).startswith(product) or len(code) != len(product) + 4:
+            continue
+        px = close_df.loc[dt, s]
+        if pd.isna(px) or not px:
+            continue
+        expiry = _contract_expiry(s)
+        if expiry <= dt.date():
+            continue
+        if int(code[-2:]) not in (3, 6, 9, 12):
+            continue
+        cands.append((expiry, s))
+    cands.sort()
+    near = cands[0][1] if len(cands) >= 1 else None
+    far = cands[1][1] if len(cands) >= 2 else None
+    return near, far
+
+
+def compute_spread_metrics_by_mode(close_df: pd.DataFrame, product: str,
+                                   last_dt: pd.Timestamp) -> dict:
+    """pair_mode 口径：逐日按季月选腿计算价差率，取近 250 日分位 + 年化毛 carry"""
+    idx = close_df.index[close_df.index <= last_dt][-SPREAD_LOOKBACK:]
+    rates = []
+    for d in idx:
+        near, far = _pick_quarter_pair(close_df, product, d)
+        if not (near and far):
+            continue
+        np_, fp = close_df.loc[d, near], close_df.loc[d, far]
+        rates.append((np_ - fp) / np_)
+    if not rates:
+        return {"percentile": float("nan"), "carry": float("nan"), "n": 0}
+    cur = rates[-1]
+    percentile = float(np.mean([r <= cur for r in rates]))
+    near_now, far_now = _pick_quarter_pair(close_df, product, last_dt)
+    if near_now and far_now:
+        days = (_contract_expiry(far_now) - _contract_expiry(near_now)).days
+        carry = float(cur * 365 / days) if days > 0 else float("nan")
+    else:
+        carry = float("nan")
+    return {"percentile": percentile, "carry": carry, "n": len(rates)}
+
+
+# 换月提前提醒阈值（交易日，np.busday_count 近似，法定节假日未剔除）
+ROLL_NOTICE_DAYS = CONFIG.get("roll_notice_days", 10)
+
+
+def _roll_notice(near: str, last_dt: pd.Timestamp) -> str | None:
+    """换月提前提醒（信息性 notice，不参与 alerts / apply_alert_scale_clamp）。
+
+    近腿距到期 <= ROLL_NOTICE_DAYS 个交易日时提示，并给出预计平仓信号日：
+    到期前 roll_before_days 个日历日之后的首个工作日。
+    """
+    roll_before_days = int(CONFIG.get("roll_before_days", 0))
+    if not near or roll_before_days <= 0:
+        return None
+    expiry = _contract_expiry(near)
+    bdays = int(np.busday_count(last_dt.date(), expiry))
+    if bdays > ROLL_NOTICE_DAYS:
+        return None
+    trigger = expiry - timedelta(days=roll_before_days)
+    est = np.busday_offset(trigger, 0, roll="forward")  # trigger 之后首个工作日
+    return (f"📅 换月提醒：近月 {near.split('.')[0]} 到期 {expiry}（约剩 {bdays} 个交易日）；"
+            f"按 roll_before_days={roll_before_days} 预计 {est} 晚发平仓信号，"
+            f"到期后 1~2 个交易日开新季月对")
+
+
 def _max_drawdown_pct(net_pnl: pd.Series, capital: float) -> float:
     """最大回撤（相对本金口径，与 OPTIMIZATION_REPORT 一致）"""
     if not len(net_pnl):
@@ -315,6 +438,29 @@ def evaluate_alerts(spread_pct: float, spread_metrics: dict, vol20: float,
     return alerts
 
 
+def apply_alert_scale_clamp(near_lots: int, far_lots: int, prev_pos: dict,
+                            alerts: list) -> tuple:
+    """风控纪律：警报活跃期（任意 🟡/🔴）只减不加。
+
+    每腿分别 clamp：|target| = min(|target|, |当前持仓|)；减仓/平仓/持平一律放行。
+    返回 (near_lots, far_lots, scale_blocked)，scale_blocked 无触发时为空 dict。
+    """
+    scale_blocked = {}
+    if not alerts:
+        return near_lots, far_lots, scale_blocked
+    for leg, target in (("near", near_lots), ("far", far_lots)):
+        current = int(prev_pos.get(f"{leg}_lots", 0) or 0)
+        clamped = int(np.sign(target)) * min(abs(target), abs(current)) if target else 0
+        if clamped != target:
+            scale_blocked[leg] = {"target": target, "clamped": clamped}
+            print(f"[SCALE-BLOCK] 警报活跃，{leg}_lots 目标手数 {target} → 截断为 {clamped}")
+            if leg == "near":
+                near_lots = clamped
+            else:
+                far_lots = clamped
+    return near_lots, far_lots, scale_blocked
+
+
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
@@ -328,11 +474,13 @@ def main():
     feed = get_datafeed()
     feed.init(output=lambda x: print(f"[datafeed] {x}"))
 
-    # 0.5 数据保障（傍晚运行场景）：先从 RQData 补齐 88 指数日线到最新，
+    # 0.5 数据保障（傍晚运行场景）：先从 RQData 补齐 88 与 889 指数日线到最新
+    # （88 用于最新交易日定位与主力映射，889 为 vol 过滤序列——连续序列计算铁律），
     # 使信号日期不受 23:00 批量下载任务时序约束（RQData 无今日数据时自动
     # 回退到最近可用交易日，行为与原来一致）
-    written_88 = ensure_contract_daily_bars([f"{p}88.CFFEX" for p in PRODUCTS])
-    print(f"88 日线补齐: {written_88}")
+    written_88 = ensure_contract_daily_bars(
+        [f"{p}{suffix}.CFFEX" for p in PRODUCTS for suffix in ("88", "889")])
+    print(f"88/889 日线补齐: {written_88}")
 
     # 1. 确定最新可用交易日（88 日线）
     latest = sig.get_latest_common_date()
@@ -346,6 +494,11 @@ def main():
         for col in mapping_now.columns:
             recent_contracts.update(v for v in mapping_now[col].dropna().unique() if isinstance(v, str))
     recent_contracts = sorted(c for c in recent_contracts if "." in c)
+    if PAIR_MODE:
+        # pair_mode 选腿不经过 dominant 映射，需额外回补最近几个季月合约
+        quarter_syms = [s for p in PRODUCTS for s in _upcoming_quarter_symbols(p, latest)]
+        print(f"季月回补候选（{PAIR_MODE}）: {quarter_syms}")
+        recent_contracts = sorted(set(recent_contracts) | set(quarter_syms))
     print(f"近期映射合约: {recent_contracts}")
     written = ensure_contract_daily_bars(recent_contracts)
     print(f"日线补齐: {written}")
@@ -370,17 +523,35 @@ def main():
     p0 = PRODUCTS[0]
     k1, k2 = f"{p0}88.CFFEX@1", f"{p0}88.CFFEX@2"
     mapping = mappings[p0]
-    near = mapping.loc[last_dt, k1] if last_dt in mapping.index else None
-    far = mapping.loc[last_dt, k2] if last_dt in mapping.index else None
-    near_lots = int(target_df.loc[last_dt, near]) if near in target_df.columns else 0
-    far_lots = int(target_df.loc[last_dt, far]) if far in target_df.columns else 0
+    if PAIR_MODE:
+        # pair_mode：仓位以策略实际选腿（target_df 非零列，按到期日排序近/远）为准；
+        # 空仓时按季月口径取展示用合约对
+        row_t = target_df.loc[last_dt]
+        legs = sorted(
+            [s for s in row_t.index if str(s).startswith(p0) and row_t[s] != 0],
+            key=_contract_expiry,
+        )
+        near = legs[0] if legs else None
+        far = legs[1] if len(legs) > 1 else None
+        if near is None:
+            near, far = _pick_quarter_pair(close_df, p0, last_dt)
+        near_lots = int(row_t.get(near, 0)) if near else 0
+        far_lots = int(row_t.get(far, 0)) if far else 0
+    else:
+        near = mapping.loc[last_dt, k1] if last_dt in mapping.index else None
+        far = mapping.loc[last_dt, k2] if last_dt in mapping.index else None
+        near_lots = int(target_df.loc[last_dt, near]) if near in target_df.columns else 0
+        far_lots = int(target_df.loc[last_dt, far]) if far in target_df.columns else 0
     near_px = float(close_df.loc[last_dt, near]) if near in close_df.columns else float("nan")
     far_px = float(close_df.loc[last_dt, far]) if far in close_df.columns else float("nan")
     spread_pct = (near_px - far_px) / near_px if near_px and not pd.isna(near_px) else float("nan")
     vol20 = compute_vol20(idx_closes[p0], last_dt)
 
     # 5.5 风控警报（carry 厚度 / 波动率 regime / 回撤超设计）
-    spread_metrics = compute_spread_metrics(mapping, close_df, k1, k2, last_dt)
+    if PAIR_MODE:
+        spread_metrics = compute_spread_metrics_by_mode(close_df, p0, last_dt)
+    else:
+        spread_metrics = compute_spread_metrics(mapping, close_df, k1, k2, last_dt)
     holding_for_alert = bool(near_lots or far_lots)
     paper_pnl = paper["net_pnl"]
     vol_thr_cfg = CONFIG["vol_threshold"]
@@ -391,6 +562,17 @@ def main():
     # 6. 与前一日状态对比
     prev = json.loads(STATE_PATH.read_text(encoding="utf-8")) if STATE_PATH.exists() else {}
     prev_pos = prev.get("position", {})
+
+    # 6.1 风控纪律：当日警报活跃期只减不加，对目标手数做 clamp（每腿分别）
+    near_lots, far_lots, scale_blocked = apply_alert_scale_clamp(
+        near_lots, far_lots, prev_pos, alerts)
+
+    # 6.2 换月提前提醒（信息性 notice：不进 alerts，不触发 clamp）
+    notices = []
+    rn = _roll_notice(near, last_dt)
+    if rn:
+        notices.append(rn)
+
     cur_pos = {"near": near, "far": far, "near_lots": near_lots, "far_lots": far_lots}
     holding = bool(near_lots or far_lots)
     if not prev:
@@ -409,6 +591,8 @@ def main():
         "spread_percentile": spread_metrics["percentile"],
         "carry_annual": spread_metrics["carry"],
         "alerts": alerts,
+        "notices": notices,
+        "scale_blocked": scale_blocked or None,
         "paper_equity": equity,
         "cum_pnl": cum_pnl,
         "updated_at": datetime.now(CHINA_TZ).isoformat(),
@@ -436,6 +620,7 @@ def main():
     else:
         alert_section = (f"- 🟢 正常：价差率分位 {spread_metrics['percentile']:.0%}，"
                          f"毛 carry {spread_metrics['carry']:.1%}，波动率与回撤均在设计范围内")
+    notice_section = "\n".join(f"- {n}" for n in notices) if notices else "- 无"
     report = f"""# Daily P&L 报告：{ACCOUNT_ID}（{','.join(PRODUCTS)} 跨期 · {CAPITAL/1e4:.0f} 万）
 **信号日期**: {last_dt.date()}
 **生成时间**: {datetime.now(CHINA_TZ).isoformat(timespec="seconds")}
@@ -443,6 +628,10 @@ def main():
 ## 风控警报
 
 {alert_section}
+
+## 提醒
+
+{notice_section}
 
 ## 数据 freshness
 
@@ -480,6 +669,8 @@ def main():
     print(f"\n信号: {near} {near_lots}手 / {far} {far_lots}手  动作={action}")
     print(f"当日盈亏 {today_pnl:,.0f} | 累计 {cum_pnl:,.0f} | 权益 {equity:,.0f}")
     print(f"风控警报: {len(alerts)} 条" + ("" if not alerts else " — " + "；".join(alerts)))
+    if notices:
+        print("提醒: " + "；".join(notices))
     print(f"日报: {report_path}")
 
 
